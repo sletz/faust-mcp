@@ -1,7 +1,8 @@
 # Faust MCP Server
 
-This repository provides an MCP server that compiles and analyzes Faust DSP code.
-The server is implemented in `faust_server.py` and exposes a single tool called
+This repository provides MCP servers that compile and analyze Faust DSP code.
+The primary server is implemented in `faust_server.py`, and a [DawDreamer-based](https://github.com/DBraun/DawDreamer)
+variant is available in `faust_server_daw.py`. Both expose a single tool called
 `compile_and_analyze`.
 
 ## Structure
