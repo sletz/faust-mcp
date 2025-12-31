@@ -25,6 +25,9 @@ mcp = FastMCP("Faust-DSP-Runner-DawDreamer", host=MCP_HOST, port=MCP_PORT)
 SAMPLE_RATE = int(os.environ.get("DD_SAMPLE_RATE", "44100"))
 BLOCK_SIZE = int(os.environ.get("DD_BLOCK_SIZE", "256"))
 RENDER_SECONDS = float(os.environ.get("DD_RENDER_SECONDS", "2.0"))
+FFT_SIZE = int(os.environ.get("DD_FFT_SIZE", "2048"))
+FFT_HOP = int(os.environ.get("DD_FFT_HOP", str(max(1, FFT_SIZE // 2))))
+ROLLOFF_RATIO = float(os.environ.get("DD_ROLLOFF", "0.85"))
 
 
 def _create_faust_processor(engine, name, faust_code, sample_rate):
@@ -101,6 +104,145 @@ def _ascii_waveform(buffer, width=60):
     return "".join(out)
 
 
+def _spectral_features(arr, sample_rate):
+    if np is None or arr is None:
+        return {
+            "spectral_centroid": None,
+            "spectral_bandwidth": None,
+            "spectral_rolloff": None,
+            "spectral_flatness": None,
+            "spectral_flux": None,
+            "spectral_frame_size": FFT_SIZE,
+            "spectral_hop_size": FFT_HOP,
+            "spectral_rolloff_ratio": ROLLOFF_RATIO,
+            "spectral_available": False,
+        }
+
+    if arr.size == 0:
+        return {
+            "spectral_centroid": None,
+            "spectral_bandwidth": None,
+            "spectral_rolloff": None,
+            "spectral_flatness": None,
+            "spectral_flux": None,
+            "spectral_frame_size": FFT_SIZE,
+            "spectral_hop_size": FFT_HOP,
+            "spectral_rolloff_ratio": ROLLOFF_RATIO,
+            "spectral_available": False,
+        }
+
+    frame_size = max(1, int(FFT_SIZE))
+    hop_size = max(1, int(FFT_HOP))
+    rolloff_ratio = float(ROLLOFF_RATIO)
+    window = np.hanning(frame_size)
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    eps = 1e-12
+
+    if arr.size < frame_size:
+        pad = frame_size - arr.size
+        arr = np.pad(arr, (0, pad))
+
+    centroids = []
+    bandwidths = []
+    rolloffs = []
+    flatnesses = []
+    fluxes = []
+    prev_mag = None
+
+    for start in range(0, arr.size - frame_size + 1, hop_size):
+        frame = arr[start : start + frame_size] * window
+        mag = np.abs(np.fft.rfft(frame))
+        mag_sum = float(np.sum(mag)) + eps
+
+        centroid = float(np.sum(freqs * mag) / mag_sum)
+        centroids.append(centroid)
+
+        bandwidth = float(np.sqrt(np.sum(((freqs - centroid) ** 2) * mag) / mag_sum))
+        bandwidths.append(bandwidth)
+
+        cumsum = np.cumsum(mag)
+        target = rolloff_ratio * mag_sum
+        idx = int(np.searchsorted(cumsum, target))
+        if idx >= len(freqs):
+            idx = len(freqs) - 1
+        rolloffs.append(float(freqs[idx]))
+
+        flatness = float(np.exp(np.mean(np.log(mag + eps))) / (np.mean(mag) + eps))
+        flatnesses.append(flatness)
+
+        if prev_mag is not None:
+            diff = mag - prev_mag
+            flux = float(np.sum(np.maximum(diff, 0.0)) / (np.sum(prev_mag) + eps))
+            fluxes.append(flux)
+        prev_mag = mag
+
+    return {
+        "spectral_centroid": float(np.mean(centroids)) if centroids else 0.0,
+        "spectral_bandwidth": float(np.mean(bandwidths)) if bandwidths else 0.0,
+        "spectral_rolloff": float(np.mean(rolloffs)) if rolloffs else 0.0,
+        "spectral_flatness": float(np.mean(flatnesses)) if flatnesses else 0.0,
+        "spectral_flux": float(np.mean(fluxes)) if fluxes else 0.0,
+        "spectral_frame_size": frame_size,
+        "spectral_hop_size": hop_size,
+        "spectral_rolloff_ratio": rolloff_ratio,
+        "spectral_available": True,
+    }
+
+
+def _compute_features(buffer, sample_rate):
+    if np is not None:
+        arr = buffer if isinstance(buffer, np.ndarray) else np.asarray(buffer, dtype=float)
+        if arr.size == 0:
+            max_amp = 0.0
+            rms = 0.0
+            dc_offset = 0.0
+            zcr = 0.0
+            clipping_ratio = 0.0
+        else:
+            max_amp = float(np.max(np.abs(arr)))
+            rms = float(np.sqrt(np.mean(np.square(arr))))
+            dc_offset = float(np.mean(arr))
+            sign = np.sign(arr)
+            sign[sign == 0] = 1
+            zcr = float(np.mean(sign[1:] != sign[:-1])) if arr.size > 1 else 0.0
+            clipping_ratio = float(np.mean(np.abs(arr) >= 0.999))
+        crest = float(max_amp / (rms + 1e-12)) if rms > 0.0 else 0.0
+        features = {
+            "dc_offset": dc_offset,
+            "zero_crossing_rate": zcr,
+            "crest_factor": crest,
+            "clipping_ratio": clipping_ratio,
+        }
+        features.update(_spectral_features(arr, sample_rate))
+        return features
+
+    buf = list(buffer)
+    if not buf:
+        features = {
+            "dc_offset": 0.0,
+            "zero_crossing_rate": 0.0,
+            "crest_factor": 0.0,
+            "clipping_ratio": 0.0,
+        }
+        features.update(_spectral_features(None, sample_rate))
+        return features
+
+    max_amp = max(abs(v) for v in buf)
+    rms = math.sqrt(sum(v * v for v in buf) / len(buf))
+    dc_offset = sum(buf) / len(buf)
+    zcr = sum(1 for i in range(1, len(buf)) if (buf[i - 1] >= 0) != (buf[i] >= 0)) / max(1, len(buf) - 1)
+    clipping_ratio = sum(1 for v in buf if abs(v) >= 0.999) / len(buf)
+    crest = max_amp / (rms + 1e-12) if rms > 0.0 else 0.0
+    features = {
+        "dc_offset": dc_offset,
+        "zero_crossing_rate": zcr,
+        "crest_factor": crest,
+        "clipping_ratio": clipping_ratio,
+    }
+    features.update(_spectral_features(None, sample_rate))
+    return features
+
+
 def _metrics_from_buffer(buffer):
     if np is not None and isinstance(buffer, np.ndarray):
         max_amp = float(np.max(np.abs(buffer))) if buffer.size else 0.0
@@ -162,10 +304,12 @@ def compile_and_analyze(faust_code: str) -> str:
             mono = []
 
         max_amp, rms, is_silent, waveform = _metrics_from_buffer(mono)
+        global_features = _compute_features(mono, SAMPLE_RATE)
 
         channel_results = []
         for idx, cbuf in enumerate(channels):
             cmax, crms, csilent, cwf = _metrics_from_buffer(cbuf)
+            cfeatures = _compute_features(cbuf, SAMPLE_RATE)
             channel_results.append(
                 {
                     "index": idx,
@@ -173,6 +317,7 @@ def compile_and_analyze(faust_code: str) -> str:
                     "rms": crms,
                     "is_silent": csilent,
                     "waveform_ascii": cwf,
+                    "features": cfeatures,
                 }
             )
 
@@ -183,6 +328,7 @@ def compile_and_analyze(faust_code: str) -> str:
             "is_silent": is_silent,
             "waveform_ascii": waveform,
             "num_outputs": len(channels),
+            "features": global_features,
             "channels": channel_results,
             "dawdreamer": {
                 "version": getattr(dd, "__version__", None)

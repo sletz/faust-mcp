@@ -22,6 +22,36 @@ def _extract_result(call_result) -> Dict[str, Any]:
     raise RuntimeError("Unexpected tool result format")
 
 
+def _validate_features(features: Dict[str, Any]) -> None:
+    for key in [
+        "dc_offset",
+        "zero_crossing_rate",
+        "crest_factor",
+        "clipping_ratio",
+        "spectral_centroid",
+        "spectral_bandwidth",
+        "spectral_rolloff",
+        "spectral_flatness",
+        "spectral_flux",
+        "spectral_frame_size",
+        "spectral_hop_size",
+        "spectral_rolloff_ratio",
+        "spectral_available",
+    ]:
+        if key not in features:
+            raise RuntimeError(f"Missing features key: {key}")
+        if key == "spectral_available":
+            if not isinstance(features[key], bool):
+                raise RuntimeError("spectral_available must be a boolean")
+            continue
+        if features[key] is None:
+            continue
+        try:
+            float(features[key])
+        except Exception as exc:
+            raise RuntimeError(f"Feature {key} is not numeric") from exc
+
+
 def _validate_payload(payload: Dict[str, Any], require_dawdreamer: bool) -> None:
     for key in ["status", "max_amplitude", "rms", "is_silent", "waveform_ascii", "num_outputs", "channels"]:
         if key not in payload:
@@ -37,6 +67,13 @@ def _validate_payload(payload: Dict[str, Any], require_dawdreamer: bool) -> None
     if not isinstance(payload["channels"], list):
         raise RuntimeError("channels must be a list")
 
+    if require_dawdreamer:
+        if "features" not in payload:
+            raise RuntimeError("Missing features block")
+        _validate_features(payload["features"])
+    elif "features" in payload:
+        _validate_features(payload["features"])
+
     for chan in payload["channels"]:
         for key in ["index", "max_amplitude", "rms", "is_silent", "waveform_ascii"]:
             if key not in chan:
@@ -47,6 +84,8 @@ def _validate_payload(payload: Dict[str, Any], require_dawdreamer: bool) -> None
             raise RuntimeError("channel max_amplitude should be non-negative")
         if crms < 0.0 or crms > cmax + 1e-6:
             raise RuntimeError("channel rms should be within [0, max_amplitude]")
+        if "features" in chan:
+            _validate_features(chan["features"])
 
     if require_dawdreamer and "dawdreamer" not in payload:
         raise RuntimeError("Missing dawdreamer block")

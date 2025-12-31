@@ -45,6 +45,7 @@ The server behavior can be configured with these variables:
 - `MCP_MOUNT_PATH` (optional, SSE only)
 - `TMPDIR` (recommended) temp folder used by the compiler toolchain
 - `DD_SAMPLE_RATE`, `DD_BLOCK_SIZE`, `DD_RENDER_SECONDS` for the DawDreamer server
+- `DD_FFT_SIZE`, `DD_FFT_HOP`, `DD_ROLLOFF` for DawDreamer spectral analysis
 
 ## Running the server
 
@@ -100,6 +101,7 @@ Notes:
 
 - DawDreamer is required only for `faust_server_daw.py`. The original server does not need it.
 - The import name can be `dawDreamer` or `dawdreamer` depending on the build; the server supports both.
+- Spectral features require `numpy`; if it is missing, `spectral_available` will be `false`.
 - If installation fails, ensure you have a compatible Python version and OS toolchain
   per the DawDreamer project documentation.
 
@@ -131,6 +133,7 @@ Makefile variables:
 - `TMPDIR`: temp directory used by server/clients (default `./tmp`).
 - `DSP`: DSP file used by `client-*` targets (default `t1.dsp`).
 - `DD_SAMPLE_RATE`, `DD_BLOCK_SIZE`, `DD_RENDER_SECONDS`: DawDreamer render settings.
+- `DD_FFT_SIZE`, `DD_FFT_HOP`, `DD_ROLLOFF`: DawDreamer spectral analysis settings.
 
 Override render settings:
 
@@ -148,13 +151,43 @@ Example output (truncated):
   "is_silent": false,
   "waveform_ascii": "############################################################",
   "num_outputs": 2,
+  "features": {
+    "dc_offset": 0.0001,
+    "zero_crossing_rate": 0.022,
+    "crest_factor": 1.98,
+    "clipping_ratio": 0.0,
+    "spectral_centroid": 1000.0,
+    "spectral_bandwidth": 120.0,
+    "spectral_rolloff": 1500.0,
+    "spectral_flatness": 0.12,
+    "spectral_flux": 0.04,
+    "spectral_frame_size": 2048,
+    "spectral_hop_size": 1024,
+    "spectral_rolloff_ratio": 0.85,
+    "spectral_available": true
+  },
   "channels": [
     {
       "index": 0,
       "max_amplitude": 1.0,
       "rms": 0.707111,
       "is_silent": false,
-      "waveform_ascii": "############################################################"
+      "waveform_ascii": "############################################################",
+      "features": {
+        "dc_offset": 0.0001,
+        "zero_crossing_rate": 0.022,
+        "crest_factor": 1.98,
+        "clipping_ratio": 0.0,
+        "spectral_centroid": 1000.0,
+        "spectral_bandwidth": 120.0,
+        "spectral_rolloff": 1500.0,
+        "spectral_flatness": 0.12,
+        "spectral_flux": 0.04,
+        "spectral_frame_size": 2048,
+        "spectral_hop_size": 1024,
+        "spectral_rolloff_ratio": 0.85,
+        "spectral_available": true
+      }
     },
     {
       "index": 1,
@@ -190,6 +223,7 @@ JSON string with:
 - `is_silent`
 - `waveform_ascii`
 - `num_outputs`
+- `features` (DawDreamer only, global time + spectral features)
 - `channels` (array of per-output metrics)
 - `dawdreamer` (present when using `faust_server_daw.py`)
 
@@ -207,12 +241,17 @@ the following fields:
   represents a chunk of the rendered buffer and is chosen by peak magnitude:
   `_` for near-silence (< 0.01), `#` for > 0.5, `=` for > 0.2, and `-` otherwise.
 - `num_outputs`: number of output channels produced by the DSP.
+- `features`: global analysis features (DawDreamer only). Includes:
+  - Time-domain: `dc_offset`, `zero_crossing_rate`, `crest_factor`, `clipping_ratio`
+  - Spectral: `spectral_centroid`, `spectral_bandwidth`, `spectral_rolloff`,
+    `spectral_flatness`, `spectral_flux` and the analysis settings
 - `channels`: array of per-output objects with:
   - `index` (0-based output index)
   - `max_amplitude`
   - `rms`
   - `is_silent` (uses the same 0.0001 threshold)
   - `waveform_ascii` (same 60-character encoding per channel)
+  - `features` (DawDreamer only, same schema as global)
 - `dawdreamer`: object with render settings and version info
 
 Render details:

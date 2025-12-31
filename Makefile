@@ -6,6 +6,9 @@ DSP ?= t1.dsp
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
+DD_FFT_SIZE ?= 2048
+DD_FFT_HOP ?= 1024
+DD_ROLLOFF ?= 0.85
 
 .PHONY: help setup clean smoke-test run-sse run-stdio run-daw client-sse client-stdio client-daw
 
@@ -28,6 +31,9 @@ help:
 	@printf "  DD_SAMPLE_RATE=%s\n" "$(DD_SAMPLE_RATE)"
 	@printf "  DD_BLOCK_SIZE=%s\n" "$(DD_BLOCK_SIZE)"
 	@printf "  DD_RENDER_SECONDS=%s\n" "$(DD_RENDER_SECONDS)"
+	@printf "  DD_FFT_SIZE=%s\n" "$(DD_FFT_SIZE)"
+	@printf "  DD_FFT_HOP=%s\n" "$(DD_FFT_HOP)"
+	@printf "  DD_ROLLOFF=%s\n" "$(DD_ROLLOFF)"
 
 setup:
 	@mkdir -p $(TMPDIR)
@@ -49,6 +55,7 @@ run-daw:
 	@$(PYTHON) - <<'PY'\nimport sys\ntry:\n    import dawdreamer  # noqa: F401\nexcept Exception:\n    try:\n        import dawDreamer  # noqa: F401\n    except Exception:\n        print(\"dawDreamer is not installed for this Python. Install with: python3 -m pip install dawDreamer\")\n        sys.exit(1)\nPY
 	MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
 	DD_SAMPLE_RATE=$(DD_SAMPLE_RATE) DD_BLOCK_SIZE=$(DD_BLOCK_SIZE) DD_RENDER_SECONDS=$(DD_RENDER_SECONDS) \
+	DD_FFT_SIZE=$(DD_FFT_SIZE) DD_FFT_HOP=$(DD_FFT_HOP) DD_ROLLOFF=$(DD_ROLLOFF) \
 	$(PYTHON) faust_server_daw.py
 
 client-sse:
@@ -62,6 +69,7 @@ client-stdio:
 client-daw:
 	@mkdir -p $(TMPDIR)
 	DD_SAMPLE_RATE=$(DD_SAMPLE_RATE) DD_BLOCK_SIZE=$(DD_BLOCK_SIZE) DD_RENDER_SECONDS=$(DD_RENDER_SECONDS) \
+	DD_FFT_SIZE=$(DD_FFT_SIZE) DD_FFT_HOP=$(DD_FFT_HOP) DD_ROLLOFF=$(DD_ROLLOFF) \
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --dsp $(DSP) --tmpdir $(TMPDIR)
 
 smoke-test:
