@@ -3,6 +3,10 @@ MCP_HOST ?= 127.0.0.1
 MCP_PORT ?= 8000
 TMPDIR ?= ./tmp
 DSP ?= t1.dsp
+WEBAUDIO_ROOT ?= external/node-web-audio-api
+RT_NAME ?= faust-rt
+RT_PARAM_PATH ?= /freq
+RT_PARAM_VALUE ?= 440
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
@@ -10,19 +14,29 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup clean smoke-test run-sse run-stdio run-daw client-sse client-stdio client-daw
+.PHONY: help setup setup-rt clean smoke-test run-sse run-stdio run-daw run-rt client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-set-param rt-stop
 
 help:
 	@printf "Targets:\n"
 	@printf "  setup        Create tmp/ and install Python deps\n"
+	@printf "  setup-rt     Install node-web-audio-api deps and build native module\n"
 	@printf "  clean        Remove tmp/ and server logs\n"
 	@printf "  smoke-test   Run a basic stdio test against both servers\n"
 	@printf "  run-sse      Start the MCP server over SSE\n"
 	@printf "  run-stdio    Start the MCP server over stdio\n"
 	@printf "  run-daw      Start the DawDreamer MCP server over SSE\n"
+	@printf "  run-rt       Start the real-time MCP server over SSE\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
+	@printf "  client-rt    Call the real-time server using t1.dsp\n"
+	@printf "\n"
+	@printf "Real-time tools:\n"
+	@printf "  rt-compile    Compile/start DSP on real-time server\n"
+	@printf "  rt-get-params Get params from real-time server\n"
+	@printf "  rt-get-param  Get a param value from real-time server\n"
+	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
+	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
 	@printf "  MCP_HOST=%s\n" "$(MCP_HOST)"
 	@printf "  MCP_PORT=%s\n" "$(MCP_PORT)"
@@ -34,10 +48,17 @@ help:
 	@printf "  DD_FFT_SIZE=%s\n" "$(DD_FFT_SIZE)"
 	@printf "  DD_FFT_HOP=%s\n" "$(DD_FFT_HOP)"
 	@printf "  DD_ROLLOFF=%s\n" "$(DD_ROLLOFF)"
+	@printf "  WEBAUDIO_ROOT=%s\n" "$(WEBAUDIO_ROOT)"
+	@printf "  RT_PARAM_PATH=%s\n" "$(RT_PARAM_PATH)"
+	@printf "  RT_PARAM_VALUE=%s\n" "$(RT_PARAM_VALUE)"
+	@printf "  RT_NAME=%s\n" "$(RT_NAME)"
 
 setup:
 	@mkdir -p $(TMPDIR)
 	$(PYTHON) -m pip install -r requirements.txt
+
+setup-rt:
+	cd $(WEBAUDIO_ROOT) && npm install && npm run build
 
 clean:
 	rm -rf $(TMPDIR) faust_server.log faust_server_sse.log __pycache__
@@ -71,6 +92,28 @@ client-daw:
 	DD_SAMPLE_RATE=$(DD_SAMPLE_RATE) DD_BLOCK_SIZE=$(DD_BLOCK_SIZE) DD_RENDER_SECONDS=$(DD_RENDER_SECONDS) \
 	DD_FFT_SIZE=$(DD_FFT_SIZE) DD_FFT_HOP=$(DD_FFT_HOP) DD_ROLLOFF=$(DD_ROLLOFF) \
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --dsp $(DSP) --tmpdir $(TMPDIR)
+
+run-rt:
+	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
+	$(PYTHON) faust_realtime_server.py
+
+client-rt:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive
+
+rt-compile:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive
+
+rt-get-params:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_params
+
+rt-get-param:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_param --param-path $(RT_PARAM_PATH)
+
+rt-set-param:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool set_param --param-path $(RT_PARAM_PATH) --param-value $(RT_PARAM_VALUE)
+
+rt-stop:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop
 
 smoke-test:
 	@mkdir -p $(TMPDIR)

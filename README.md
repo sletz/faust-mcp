@@ -1,23 +1,56 @@
-# Faust MCP Server
+# Faust MCP Servers
 
-This repository provides MCP servers that compile and analyze Faust DSP code.
-The primary server is implemented in `faust_server.py`, and a [DawDreamer-based](https://github.com/DBraun/DawDreamer)
-variant is available in `faust_server_daw.py`. Both expose a single tool called
-`compile_and_analyze`.
+This repository provides three MCP servers that compile and analyze Faust DSP code:
+
+- `faust_server.py`: C++ compile pipeline (Faust CLI + g++).
+- `faust_server_daw.py`: DawDreamer offline render pipeline.
+- `faust_realtime_server.py`: real-time playback via node-web-audio-api + Faust WASM.
 
 ## Structure
 
 - `faust_server.py`: MCP server entrypoint (FastMCP) and tool implementation.
 - `faust_server_daw.py`: DawDreamer-based MCP server (no C++ compile step).
+- `faust_realtime_server.py`: Real-time MCP server using node-web-audio-api + Faust WASM.
+- `faust_realtime_worker.mjs`: Node worker that hosts the real-time DSP graph.
 - `analysis_arch.cpp`: Faust C++ architecture used to generate analysis data.
 - `t1.dsp`, `t2.dsp`, `noise.dsp`: Example Faust DSP programs.
 - `sse_client_example.py`: SSE client example.
 - `stdio_client_example.py`: stdio client example.
-- `smoke_test.py`: Basic stdio smoke test for both servers.
+- `smoke_test.py`: Basic stdio smoke test for both offline servers.
 - `Makefile`: Common run/test targets.
 - `requirements.txt`: Client-side Python dependencies.
 
-### Server flow (faust_server.py)
+## Quick Start
+
+```bash
+make setup
+make smoke-test DSP=t1.dsp
+```
+
+Cleanup:
+
+```bash
+make clean
+```
+
+Real-time setup:
+
+```bash
+make setup-rt
+```
+
+## Shared Environment Variables
+
+- `MCP_HOST` (default: `127.0.0.1`)
+- `MCP_PORT` (default: `8000`)
+- `MCP_TRANSPORT` (default: `sse`)
+  - Supported values: `sse`, `streamable-http`, `stdio`
+- `MCP_MOUNT_PATH` (optional, SSE only)
+- `TMPDIR` (recommended) temp folder used by the compiler toolchain
+
+## Server 1: C++ Compile Pipeline (`faust_server.py`)
+
+### What it does
 
 1. Accept a Faust DSP string via the `compile_and_analyze` tool.
 2. Write it to a temporary `process.dsp` file.
@@ -26,49 +59,14 @@ variant is available in `faust_server_daw.py`. Both expose a single tool called
 5. Run the binary to produce JSON analysis output.
 6. Return the JSON result to the MCP client.
 
-## Requirements
+### Requirements
 
 - Python 3.10+
 - Faust CLI available in PATH (`faust`)
 - C++ compiler (`g++`) with C++11+ support
 - Python package `mcp`
-- See `requirements.txt` for client dependencies
-- Optional: `dawDreamer` for the alternative DawDreamer-based server
 
-## Environment variables
-
-The server behavior can be configured with these variables:
-
-- `MCP_HOST` (default: `127.0.0.1`)
-- `MCP_PORT` (default: `8000`)
-- `MCP_TRANSPORT` (default: `sse`)
-- Supported values: `sse`, `streamable-http`, `stdio`
-- `MCP_MOUNT_PATH` (optional, SSE only)
-- `TMPDIR` (recommended) temp folder used by the compiler toolchain
-- `DD_SAMPLE_RATE`, `DD_BLOCK_SIZE`, `DD_RENDER_SECONDS` for the DawDreamer server
-- `DD_FFT_SIZE`, `DD_FFT_HOP`, `DD_ROLLOFF` for DawDreamer spectral analysis
-
-## Running the server
-
-### Setup
-
-```bash
-make setup
-```
-
-### Smoke test
-
-```bash
-make smoke-test DSP=t1.dsp
-```
-
-### Cleanup
-
-```bash
-make clean
-```
-
-### SSE (HTTP) transport
+### Run (SSE)
 
 ```bash
 MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
@@ -76,21 +74,75 @@ TMPDIR=/path/to/tmp \
 python3 faust_server.py
 ```
 
-By default the SSE endpoint is:
+Default SSE endpoint:
 
 - `http://127.0.0.1:8000/sse`
 
-### Stdio transport
+### Run (stdio)
 
 ```bash
 MCP_TRANSPORT=stdio python3 faust_server.py
 ```
 
-## DawDreamer server (no C++ compile step)
+### Tool: compile_and_analyze
 
-This variant uses DawDreamer to compile and render Faust DSP directly in Python,
-so you do not need to generate and compile C++ code. It renders offline audio
-and returns the same analysis metrics plus a `dawdreamer` info block.
+**Input:**
+
+- `faust_code` (string) - the DSP source code
+
+**Output:**
+
+JSON string with:
+
+- `status`
+- `max_amplitude`
+- `rms`
+- `is_silent`
+- `waveform_ascii`
+- `num_outputs`
+- `channels` (array of per-output metrics)
+
+### How analysis_arch.cpp computes outputs
+
+The analysis is performed by `analysis_arch.cpp` and returns a JSON payload with
+these fields:
+
+- `status`: hard-coded to `"success"` when the binary completes.
+- `max_amplitude`: maximum absolute value of the **mono mix** over the full render.
+  The mono mix is the average of all output channels per sample.
+- `rms`: root-mean-square of the mono mix over the full render.
+- `is_silent`: `true` when `max_amplitude < 0.0001`, otherwise `false`.
+- `waveform_ascii`: a 60-character ASCII summary of the mono mix. Each character
+  represents a chunk of the rendered buffer and is chosen by peak magnitude:
+  `_` for near-silence (< 0.01), `#` for > 0.5, `=` for > 0.2, and `-` otherwise.
+- `num_outputs`: number of output channels produced by the DSP.
+- `channels`: array of per-output objects with:
+  - `index` (0-based output index)
+  - `max_amplitude`
+  - `rms`
+  - `is_silent`
+  - `waveform_ascii`
+
+Render details:
+
+- Sample rate: 44100 Hz
+- Duration: 2 seconds (88200 samples)
+- Processing block size: 256 frames
+
+## Server 2: DawDreamer Offline Pipeline (`faust_server_daw.py`)
+
+### What it does
+
+This variant uses [DawDreamer](https://github.com/DBraun/DawDreamer) to compile 
+and render Faust DSP directly in Python, so you do not need to generate and compile C++ code. 
+It renders offline audio and returns the same analysis metrics plus a `dawdreamer` info block and
+DawDreamer-only features.
+
+### Requirements
+
+- Python 3.10+
+- `dawDreamer` (import name can be `dawDreamer` or `dawdreamer`)
+- `numpy` for spectral features (otherwise `spectral_available` is `false`)
 
 Install:
 
@@ -98,15 +150,12 @@ Install:
 python3 -m pip install dawDreamer
 ```
 
-Notes:
+### Environment variables
 
-- DawDreamer is required only for `faust_server_daw.py`. The original server does not need it.
-- The import name can be `dawDreamer` or `dawdreamer` depending on the build; the server supports both.
-- Spectral features require `numpy`; if it is missing, `spectral_available` will be `false`.
-- If installation fails, ensure you have a compatible Python version and OS toolchain
-  per the DawDreamer project documentation.
+- `DD_SAMPLE_RATE`, `DD_BLOCK_SIZE`, `DD_RENDER_SECONDS` for rendering
+- `DD_FFT_SIZE`, `DD_FFT_HOP`, `DD_ROLLOFF` for spectral analysis
 
-Run:
+### Run (SSE)
 
 ```bash
 MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
@@ -122,25 +171,17 @@ make client-daw DSP=t1.dsp
 ```
 
 `make client-daw DSP=...` runs the SSE client against the DawDreamer server using
-the specified DSP file. You can also use the generic SSE target the same way:
+that DSP file. You can also use:
 
 ```bash
 make client-sse DSP=t1.dsp
 ```
 
-Makefile variables:
+### DawDreamer output additions
 
-- `MCP_HOST`, `MCP_PORT`: server bind address for SSE.
-- `TMPDIR`: temp directory used by server/clients (default `./tmp`).
-- `DSP`: DSP file used by `client-*` targets (default `t1.dsp`).
-- `DD_SAMPLE_RATE`, `DD_BLOCK_SIZE`, `DD_RENDER_SECONDS`: DawDreamer render settings.
-- `DD_FFT_SIZE`, `DD_FFT_HOP`, `DD_ROLLOFF`: DawDreamer spectral analysis settings.
-
-Override render settings:
-
-```bash
-make run-daw DD_SAMPLE_RATE=48000 DD_BLOCK_SIZE=512 DD_RENDER_SECONDS=1.0
-```
+- `features` (global time + spectral features)
+- Per-channel `features`
+- `dawdreamer` object with render settings and version info
 
 Example output (truncated):
 
@@ -189,13 +230,6 @@ Example output (truncated):
         "spectral_rolloff_ratio": 0.85,
         "spectral_available": true
       }
-    },
-    {
-      "index": 1,
-      "max_amplitude": 0.999992,
-      "rms": 0.707109,
-      "is_silent": false,
-      "waveform_ascii": "############################################################"
     }
   ],
   "dawdreamer": {
@@ -208,96 +242,137 @@ Example output (truncated):
 }
 ```
 
-## Tool: compile_and_analyze
+## Server 3: Real-time WebAudio Pipeline (`faust_realtime_server.py`)
 
-**Input:**
+### What it does
 
-- `faust_code` (string) - the DSP source code
+This variant compiles Faust DSP code to WebAudio on the fly and plays it in real time
+using the `node-web-audio-api` runtime. It returns parameter metadata extracted from
+the Faust JSON so an LLM can control the running DSP.
 
-**Output:**
+[node-web-audio-api](https://github.com/ircam-ismm/node-web-audio-api) is an open-source Node.js implementation 
+of the Web Audio API that provides AudioContext/AudioWorklet support outside the browser, backed by
+native audio I/O. 
 
-JSON string with:
+### Requirements
 
-- `status`
-- `max_amplitude`
-- `rms`
-- `is_silent`
-- `waveform_ascii`
-- `num_outputs`
-- `features` (DawDreamer only, global time + spectral features)
-- `channels` (array of per-output metrics)
-- `dawdreamer` (present when using `faust_server_daw.py`)
+- Node.js
+- `node-web-audio-api` checkout at `WEBAUDIO_ROOT` (submodule: `external/node-web-audio-api`)
+- `@grame/faustwasm` installed in that checkout
 
-### How analysis_arch.cpp computes outputs
+Submodule setup (one-time):
 
-The analysis is performed by `analysis_arch.cpp` and returns a JSON payload with
-the following fields:
+```bash
+git submodule update --init --recursive
+cd external/node-web-audio-api
+npm install
+npm run build
+```
 
-- `status`: hard-coded to `"success"` when the binary completes.
-- `max_amplitude`: maximum absolute value of the **mono mix** over the full render.
-  The mono mix is the average of all output channels per sample.
-- `rms`: root-mean-square of the mono mix over the full render.
-- `is_silent`: `true` when `max_amplitude < 0.0001`, otherwise `false`.
-- `waveform_ascii`: a 60-character ASCII summary of the mono mix. Each character
-  represents a chunk of the rendered buffer and is chosen by peak magnitude:
-  `_` for near-silence (< 0.01), `#` for > 0.5, `=` for > 0.2, and `-` otherwise.
-- `num_outputs`: number of output channels produced by the DSP.
-- `features`: global analysis features (DawDreamer only). Includes:
-  - Time-domain: `dc_offset`, `zero_crossing_rate`, `crest_factor`, `clipping_ratio`
-  - Spectral: `spectral_centroid`, `spectral_bandwidth`, `spectral_rolloff`,
-    `spectral_flatness`, `spectral_flux` and the analysis settings
-- `channels`: array of per-output objects with:
-  - `index` (0-based output index)
-  - `max_amplitude`
-  - `rms`
-  - `is_silent` (uses the same 0.0001 threshold)
-  - `waveform_ascii` (same 60-character encoding per channel)
-  - `features` (DawDreamer only, same schema as global)
-- `dawdreamer`: object with render settings and version info
+### Notes
 
-Render details:
+- The real-time server runs one DSP at a time; `compile_and_start` replaces it.
+- Parameter paths come from Faust JSON, not `RT_NAME`. Use `make rt-get-params`.
+- `npm run build` generates `node-web-audio-api.build-release.node` and should be re-run
+  if you update the submodule or switch branches.
+- If you get no sound, check OS audio permissions and the default output device.
 
-- Sample rate: 44100 Hz
-- Duration: 2 seconds (88200 samples)
-- Processing block size: 256 frames
+### Run (SSE)
 
-Example input (`t1.dsp`):
+```bash
+WEBAUDIO_ROOT=external/node-web-audio-api \
+MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
+python3 faust_realtime_server.py
+```
+
+### Real-time tools
+
+- `compile_and_start(faust_code, name?, latency_hint?)`
+- `get_params()`
+- `get_param(path)`
+- `set_param(path, value)`
+- `stop()`
+
+`latency_hint` accepts `interactive` (default) or `playback`.
+
+### Python ↔ Node worker bridge
+
+The real-time server runs a Node worker process and talks to it over stdin/stdout:
+
+- `faust_realtime_server.py` starts the worker with `node faust_realtime_worker.mjs`
+  and passes `WEBAUDIO_ROOT` in the environment.
+- The worker reads JSON lines like:
+  `{ "id": 1, "method": "compile_and_start", "params": {...} }`
+- It responds with:
+  `{ "id": 1, "result": {...} }` or `{ "id": 1, "error": "..." }`
+- The Python server forwards MCP tool calls to the worker and returns the result.
+
+## Example DSP Files
+
+`t1.dsp`:
 
 ```faust
 import("stdfaust.lib");
-process = os.osc(500), os.osc(600);
+
+freq = hslider("freq[Hz]", 500, 50, 2000, 1);
+gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
+
+process = os.osc(freq) * gain;
 ```
 
-Another example (`noise.dsp`):
+`t2.dsp`:
 
 ```faust
 import("stdfaust.lib");
-process = no.noise;
+
+freq1 = hslider("freq1[Hz]", 500, 50, 2000, 1);
+freq2 = hslider("freq2[Hz]", 600, 50, 2000, 1);
+gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
+
+process = os.osc(freq1) * gain, os.osc(freq2) * gain;
 ```
 
-## Client example (SSE)
+`noise.dsp`:
+
+```faust
+import("stdfaust.lib");
+
+gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
+
+process = no.noise * gain;
+```
+
+## Clients
+
+### SSE client
 
 ```bash
 python3 sse_client_example.py --url http://127.0.0.1:8000/sse --dsp t1.dsp
 ```
 
-This SSE client works with both servers:
+`compile_and_start` example:
 
-- `faust_server.py` (C++ compile pipeline)
-- `faust_server_daw.py` (DawDreamer)
+```bash
+python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
+  --tool compile_and_start --dsp t1.dsp --name osc1 --latency interactive
+```
 
-## Client example (stdio)
+### stdio client
 
 ```bash
 python3 stdio_client_example.py --dsp t1.dsp
 ```
 
-Both client example scripts accept CLI arguments:
+### Makefile real-time helpers
 
-- `sse_client_example.py`: `--url`, `--dsp`
-- `stdio_client_example.py`: `--dsp`, `--server`, `--tmpdir`
-- `sse_client_example.py`: `--url`, `--dsp`, `--tmpdir` (client-side only)
-- `stdio_client_example.py` forces `MCP_TRANSPORT=stdio` for the server process
+```bash
+make run-rt
+make rt-compile DSP=t1.dsp RT_NAME=osc1
+make rt-get-params
+make rt-get-param RT_PARAM_PATH=/freq
+make rt-set-param RT_PARAM_PATH=/freq RT_PARAM_VALUE=440
+make rt-stop
+```
 
 ## Transport matrix
 
@@ -307,6 +382,8 @@ Both client example scripts accept CLI arguments:
 | `faust_server.py` | stdio | `stdio_client_example.py` / `make client-stdio` | Yes |
 | `faust_server_daw.py` | SSE | `sse_client_example.py` / `make client-daw` | Yes |
 | `faust_server_daw.py` | stdio | `stdio_client_example.py` | Yes |
+| `faust_realtime_server.py` | SSE | `sse_client_example.py` | Yes |
+| `faust_realtime_server.py` | stdio | `stdio_client_example.py` | Yes |
 
 ## Client configuration examples
 
@@ -334,10 +411,10 @@ If your MCP client reads a `servers.json` file, add a stdio server entry:
   "servers": {
     "faust": {
       "command": "python3",
-      "args": ["/Users/letz/Developpements/faust-mcp/faust_server.py"],
+      "args": ["/path/to/faust-mcp/faust_server.py"],
       "env": {
         "MCP_TRANSPORT": "stdio",
-        "TMPDIR": "/Users/letz/Developpements/faust-mcp/tmp"
+        "TMPDIR": "/path/to/faust-mcp/tmp"
       }
     }
   }
