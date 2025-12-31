@@ -1,0 +1,6 @@
+tmp/
+.DS_Store
+__pycache__/
+*.pyc
+faust_server.log
+faust_server_sse.log

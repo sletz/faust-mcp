@@ -182,6 +182,7 @@ def compile_and_analyze(faust_code: str) -> str:
             "rms": rms,
             "is_silent": is_silent,
             "waveform_ascii": waveform,
+            "num_outputs": len(channels),
             "channels": channel_results,
             "dawdreamer": {
                 "version": getattr(dd, "__version__", None)

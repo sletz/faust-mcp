@@ -12,6 +12,7 @@ The server is implemented in `faust_server.py` and exposes a single tool called
 - `t1.dsp`, `t2.dsp`, `noise.dsp`: Example Faust DSP programs.
 - `sse_client_example.py`: SSE client example.
 - `stdio_client_example.py`: stdio client example.
+- `smoke_test.py`: Basic stdio smoke test for both servers.
 - `Makefile`: Common run/test targets.
 - `requirements.txt`: Client-side Python dependencies.
 
@@ -51,6 +52,12 @@ The server behavior can be configured with these variables:
 
 ```bash
 make setup
+```
+
+### Smoke test
+
+```bash
+make smoke-test DSP=t1.dsp
 ```
 
 ### Cleanup
@@ -140,6 +147,7 @@ Example output (truncated):
   "rms": 0.49998,
   "is_silent": false,
   "waveform_ascii": "############################################################",
+  "num_outputs": 2,
   "channels": [
     {
       "index": 0,
@@ -181,6 +189,7 @@ JSON string with:
 - `rms`
 - `is_silent`
 - `waveform_ascii`
+- `num_outputs`
 - `channels` (array of per-output metrics)
 - `dawdreamer` (present when using `faust_server_daw.py`)
 
@@ -197,6 +206,7 @@ the following fields:
 - `waveform_ascii`: a 60-character ASCII summary of the mono mix. Each character
   represents a chunk of the rendered buffer and is chosen by peak magnitude:
   `_` for near-silence (< 0.01), `#` for > 0.5, `=` for > 0.2, and `-` otherwise.
+- `num_outputs`: number of output channels produced by the DSP.
 - `channels`: array of per-output objects with:
   - `index` (0-based output index)
   - `max_amplitude`
@@ -248,6 +258,15 @@ Both client example scripts accept CLI arguments:
 - `stdio_client_example.py`: `--dsp`, `--server`, `--tmpdir`
 - `sse_client_example.py`: `--url`, `--dsp`, `--tmpdir` (client-side only)
 - `stdio_client_example.py` forces `MCP_TRANSPORT=stdio` for the server process
+
+## Transport matrix
+
+| Server | Transport | Client | Works |
+| --- | --- | --- | --- |
+| `faust_server.py` | SSE | `sse_client_example.py` / `make client-sse` | Yes |
+| `faust_server.py` | stdio | `stdio_client_example.py` / `make client-stdio` | Yes |
+| `faust_server_daw.py` | SSE | `sse_client_example.py` / `make client-daw` | Yes |
+| `faust_server_daw.py` | stdio | `stdio_client_example.py` | Yes |
 
 ## Client configuration examples
 

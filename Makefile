@@ -7,12 +7,13 @@ DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
 
-.PHONY: help setup clean run-sse run-stdio run-daw client-sse client-stdio client-daw
+.PHONY: help setup clean smoke-test run-sse run-stdio run-daw client-sse client-stdio client-daw
 
 help:
 	@printf "Targets:\n"
 	@printf "  setup        Create tmp/ and install Python deps\n"
 	@printf "  clean        Remove tmp/ and server logs\n"
+	@printf "  smoke-test   Run a basic stdio test against both servers\n"
 	@printf "  run-sse      Start the MCP server over SSE\n"
 	@printf "  run-stdio    Start the MCP server over stdio\n"
 	@printf "  run-daw      Start the DawDreamer MCP server over SSE\n"
@@ -45,6 +46,7 @@ run-stdio:
 
 run-daw:
 	@mkdir -p $(TMPDIR)
+	@$(PYTHON) - <<'PY'\nimport sys\ntry:\n    import dawdreamer  # noqa: F401\nexcept Exception:\n    try:\n        import dawDreamer  # noqa: F401\n    except Exception:\n        print(\"dawDreamer is not installed for this Python. Install with: python3 -m pip install dawDreamer\")\n        sys.exit(1)\nPY
 	MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
 	DD_SAMPLE_RATE=$(DD_SAMPLE_RATE) DD_BLOCK_SIZE=$(DD_BLOCK_SIZE) DD_RENDER_SECONDS=$(DD_RENDER_SECONDS) \
 	$(PYTHON) faust_server_daw.py
@@ -61,3 +63,7 @@ client-daw:
 	@mkdir -p $(TMPDIR)
 	DD_SAMPLE_RATE=$(DD_SAMPLE_RATE) DD_BLOCK_SIZE=$(DD_BLOCK_SIZE) DD_RENDER_SECONDS=$(DD_RENDER_SECONDS) \
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --dsp $(DSP) --tmpdir $(TMPDIR)
+
+smoke-test:
+	@mkdir -p $(TMPDIR)
+	$(PYTHON) smoke_test.py --dsp $(DSP) --tmpdir $(TMPDIR)

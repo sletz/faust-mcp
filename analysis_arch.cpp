@@ -132,6 +132,7 @@ int main(int argc, char* argv[])
     std::cout << "  \"rms\": " << rms << "," << std::endl;
     std::cout << "  \"is_silent\": " << (maxAmp < 0.0001 ? "true" : "false") << "," << std::endl;
     std::cout << "  \"waveform_ascii\": \"" << asciiWaveform(monoMix, 60, 10) << "\"," << std::endl;
+    std::cout << "  \"num_outputs\": " << outputs << "," << std::endl;
     std::cout << "  \"channels\": [" << std::endl;
     for (int c = 0; c < outputs; c++) {
         float crms = std::sqrt(chanSumSq[c] / samples);
