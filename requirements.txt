@@ -1,0 +1,4 @@
+anyio
+httpx
+httpx-sse
+mcp
