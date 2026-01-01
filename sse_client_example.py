@@ -19,7 +19,7 @@ async def main(
         async with ClientSession(read, write) as session:
             await session.initialize()
             args = None
-            if tool in ("compile_and_analyze", "compile_and_start"):
+            if tool in ("compile_and_analyze", "compile_and_start", "check_syntax"):
                 if not dsp_path:
                     raise ValueError("--dsp is required for compile tools")
                 with open(dsp_path, "r", encoding="utf-8") as f:
@@ -30,6 +30,8 @@ async def main(
                         args["name"] = name
                     if latency_hint:
                         args["latency_hint"] = latency_hint
+                elif tool == "check_syntax" and name:
+                    args["name"] = name
             elif tool == "get_param":
                 if not param_path:
                     raise ValueError("--param-path is required for get_param")
@@ -64,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, get_params, get_param, get_param_values, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, set_param, stop).",
     )
     parser.add_argument(
         "--name",

@@ -153,6 +153,33 @@ function extractParamsFromJson(jsonObj) {
 /**
  * Compile DSP code, start playback, and return JSON + param metadata.
  */
+async function checkSyntax({ dsp_code, name, args }) {
+  // Compile DSP to validate syntax without starting audio.
+  await initFaust();
+  if (!dsp_code) {
+    return { status: 'error', error: 'Missing dsp_code' };
+  }
+  const dspName = name || 'faust-check';
+  const compilerArgs = args || '-ftz 2';
+  try {
+    const factory = await compiler.createMonoDSPFactory(
+      dspName,
+      dsp_code,
+      compilerArgs,
+    );
+    const json = factory?.json ? JSON.parse(factory.json) : null;
+    return { status: 'ok', name: json?.name || dspName, json };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const detail = compiler?.getErrorMessage?.() || '';
+    const error = detail && detail !== message ? `${message}\n${detail}` : message;
+    return { status: 'error', error };
+  }
+}
+
+/**
+ * Compile DSP code, start playback, and return JSON + param metadata.
+ */
 async function compileAndStart({ dsp_code, name, latency_hint }) {
   // Compile DSP, create AudioWorklet node, connect, and start.
   await initFaust();
@@ -369,6 +396,7 @@ function startUiServer() {
 }
 
 const handlers = {
+  check_syntax: checkSyntax,
   compile_and_start: compileAndStart,
   set_param: setParam,
   get_param: getParam,

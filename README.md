@@ -52,7 +52,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `get_params`, `set_param`, `get_param`, `get_param_values`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `get_param`, `get_param_values`, `stop`.
 - Offline tools: `compile_and_analyze`.
 
 ## Quick Start
@@ -354,6 +354,7 @@ Then open:
 ### Real-time tools
 
 - `compile_and_start(faust_code, name?, latency_hint?)`
+- `check_syntax(faust_code, name?)`
 - `get_params()`
 - `get_param(path)`
 - `get_param_values()`

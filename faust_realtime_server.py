@@ -7,8 +7,10 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 
 Tools:
   - compile_and_start(faust_code, name?, latency_hint?)
+  - check_syntax(faust_code, name?)
   - get_params()
   - get_param(path)
+  - get_param_values()
   - set_param(path, value)
   - stop()
 
@@ -117,6 +119,19 @@ class NodeWorker:
 
 
 worker = NodeWorker()
+
+
+@mcp.tool()
+def check_syntax(faust_code: str, name: str = "faust-check") -> str:
+    """
+    Validate Faust DSP syntax using the Faust WASM compiler (no audio started).
+    """
+
+    result = worker.request(
+        "check_syntax",
+        {"dsp_code": faust_code, "name": name},
+    )
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool()
