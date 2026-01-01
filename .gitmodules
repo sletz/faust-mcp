@@ -1,3 +1,3 @@
 [submodule "external/node-web-audio-api"]
 	path = external/node-web-audio-api
-	url = https://github.com/ircam-ismm/node-web-audio-api
+	url = https://github.com/sletz/node-web-audio-api

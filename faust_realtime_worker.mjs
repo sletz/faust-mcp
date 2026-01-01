@@ -129,12 +129,13 @@ function collectParams(items, acc) {
     const meta = metaToObject(item.meta);
     acc.push({
       path: item.address,
+      shortname: item.shortname,
       label: item.label,
       type,
-      init: item.init ?? null,
-      min: item.min ?? null,
-      max: item.max ?? null,
-      step: item.step ?? null,
+      init: item.init,
+      min: item.min,
+      max: item.max,
+      step: item.step,
       unit: meta.unit ?? null,
       meta,
     });
