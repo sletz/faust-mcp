@@ -1,3 +1,10 @@
+/**
+ * Faust analysis architecture example.
+ *
+ * Renders DSP output offline, computes basic amplitude metrics, and prints
+ * a JSON report including ASCII waveform summaries.
+ */
+
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -30,6 +37,12 @@
 /*******************BEGIN ARCHITECTURE SECTION (part 2/2)***************/
 
 // -- ASCII Art Helper --
+/**
+ * Create a compact ASCII waveform summary for a buffer.
+ *
+ * Returns a string of length `width` with characters chosen from the
+ * local min/max amplitude range in each bucket.
+ */
 std::string asciiWaveform(const std::vector<float>& buffer, int width, int height)
 {
     std::string out = "";
@@ -52,6 +65,9 @@ std::string asciiWaveform(const std::vector<float>& buffer, int width, int heigh
     return out;
 }
 
+/**
+ * Render the compiled DSP, analyze output levels, and print a JSON report.
+ */
 int main(int argc, char* argv[])
 {
     // 1. Instantiate the DSP (The class name 'mydsp' is standard in Faust compilation)

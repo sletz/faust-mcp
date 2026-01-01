@@ -1,3 +1,8 @@
+"""Example SSE client for calling the Faust MCP server.
+
+Runs a single tool invocation against the SSE endpoint and prints the result.
+"""
+
 import argparse
 import os
 
@@ -15,6 +20,11 @@ async def main(
     param_path: str | None,
     param_value: float | None,
 ) -> None:
+    """Call the requested MCP tool over SSE with the provided arguments.
+
+    Raises:
+        ValueError: If required CLI arguments are missing for the selected tool.
+    """
     async with sse_client(url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

@@ -1,3 +1,9 @@
+"""Example stdio client for calling the Faust MCP server.
+
+Starts the server as a subprocess over stdio, calls compile_and_analyze,
+and prints the result.
+"""
+
 import argparse
 
 import anyio
@@ -6,6 +12,13 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 async def main(dsp_path: str, server_path: str, tmpdir: str | None) -> None:
+    """Run the stdio MCP client and call compile_and_analyze.
+
+    Args:
+        dsp_path: Path to the Faust DSP source file.
+        server_path: Python entrypoint for the MCP server.
+        tmpdir: Optional TMPDIR override for the server process.
+    """
     env = {"MCP_TRANSPORT": "stdio"}
     if tmpdir:
         env["TMPDIR"] = tmpdir
