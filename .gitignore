@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 faust_server.log
 faust_server_sse.log
+ui/node_modules/

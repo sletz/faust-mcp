@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Faust RT UI</title>
+  <link rel="stylesheet" href="/faust-ui/index.css" />
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    h1 { margin-bottom: 8px; text-align: center; }
+    .status { color: #444; margin-bottom: 16px; display: none; text-align: center; }
+    .param { margin: 10px 0; }
+    .param label { display: block; font-size: 13px; color: #333; }
+    .param input[type=range] { width: 320px; }
+    .param .value { display: inline-block; min-width: 60px; text-align: right; }
+    #fallback-ui { text-align: center; }
+    #fallback-ui .param { display: inline-block; text-align: left; margin: 10px 12px; }
+    #faust-ui-container {
+      margin-top: 16px;
+      max-width: 100%;
+      max-height: calc(100vh - 180px);
+      overflow: auto;
+      border-radius: 6px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    #faust-ui-root {
+      --faust-ui-scale: 1.6;
+      transform: scale(var(--faust-ui-scale));
+      transform-origin: top left;
+      width: fit-content;
+    }
+    #dsp-name { font-weight: 600; margin-top: 4px; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Faust Real-time UI</h1>
+  <div class="status" id="status">Loading...</div>
+  <div id="dsp-name"></div>
+  <div id="faust-ui-container">
+    <div id="faust-ui-root"></div>
+  </div>
+  <div id="fallback-ui"></div>
+
+  <script type="module">
+    async function fetchJson(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
+      return res.json();
+    }
+
+    async function setParam(path, value) {
+      await fetch('/param', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, value })
+      });
+    }
+
+    function renderFallback(params) {
+      const container = document.getElementById('fallback-ui');
+      container.innerHTML = '';
+      params.forEach((param) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'param';
+        const label = document.createElement('label');
+        label.textContent = `${param.path} (${param.label || ''})`;
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = param.min ?? 0;
+        input.max = param.max ?? 1;
+        input.step = param.step ?? 0.01;
+        input.value = param.init ?? param.min ?? 0;
+        const value = document.createElement('span');
+        value.className = 'value';
+        value.textContent = input.value;
+        input.addEventListener('input', async () => {
+          value.textContent = input.value;
+          await setParam(param.path, Number(input.value));
+        });
+        wrap.append(label, input, value);
+        container.append(wrap);
+      });
+    }
+
+    async function tryFaustUI(faustJson, params) {
+      // Optional: load faust-ui bundle if provided under /faust-ui/.
+      try {
+        const module = await import('/faust-ui/index.js');
+        console.log('faust-ui module keys:', Object.keys(module));
+        const FaustUI = module.default || module.FaustUI || null;
+        if (!FaustUI) return false;
+        const root = document.getElementById('faust-ui-root');
+        root.innerHTML = '';
+        const ui = new FaustUI({
+          root,
+          ui: faustJson.ui || [],
+          listenWindowMessage: false,
+        });
+        ui.paramChangeByUI = async (path, value) => {
+          await setParam(path, value);
+        };
+        if (ui && typeof ui.mount === 'function') {
+          ui.mount();
+        }
+        requestAnimationFrame(updateFaustUiScale);
+        return true;
+      } catch (err) {
+        console.error('Failed to load faust-ui module', err);
+        const status = document.getElementById('status');
+        status.textContent = `faust-ui load failed: ${err}`;
+        return false;
+      }
+    }
+
+    const FIXED_UI_SCALE = 1.6;
+
+    function updateFaustUiScale() {
+      const root = document.getElementById('faust-ui-root');
+      const container = document.getElementById('faust-ui-container');
+      if (!root) return;
+      const padding = 32;
+      root.style.setProperty('--faust-ui-scale', '1');
+      const contentWidth = Math.max(root.scrollWidth, root.offsetWidth);
+      const contentHeight = Math.max(root.scrollHeight, root.offsetHeight);
+      const availableWidth = (container?.clientWidth || window.innerWidth) - padding;
+      const availableHeight = (container?.clientHeight || window.innerHeight) - padding;
+      const widthScale = contentWidth ? availableWidth / contentWidth : FIXED_UI_SCALE;
+      const heightScale = contentHeight ? availableHeight / contentHeight : FIXED_UI_SCALE;
+      const scale = Math.min(FIXED_UI_SCALE, widthScale, heightScale);
+      root.style.setProperty('--faust-ui-scale', scale.toFixed(3));
+    }
+
+    async function renderOnce() {
+      const status = document.getElementById('status');
+      const dspName = document.getElementById('dsp-name');
+      try {
+        const statusJson = await fetchJson('/status');
+        dspName.textContent = statusJson.name ? `DSP: ${statusJson.name}` : 'DSP: (none)';
+        const json = await fetchJson('/json');
+        const params = await fetchJson('/params');
+        const usedFaustUI = await tryFaustUI(json, params.params || params);
+        if (!usedFaustUI) {
+          renderFallback(params.params || params);
+        }
+        return JSON.stringify({ name: statusJson.name, json });
+      } catch (err) {
+        status.textContent = String(err);
+        return null;
+      }
+    }
+
+    async function main() {
+      updateFaustUiScale();
+      window.addEventListener('resize', () => requestAnimationFrame(updateFaustUiScale));
+      let lastJson = await renderOnce();
+      setInterval(async () => {
+        try {
+          const json = await fetchJson('/json');
+          const statusJson = await fetchJson('/status');
+          const current = JSON.stringify({ name: statusJson.name, json });
+          if (current && current === lastJson) {
+            return;
+          }
+          const params = await fetchJson('/params');
+          const dspName = document.getElementById('dsp-name');
+          dspName.textContent = statusJson.name ? `DSP: ${statusJson.name}` : 'DSP: (none)';
+          const usedFaustUI = await tryFaustUI(json, params.params || params);
+          if (!usedFaustUI) {
+            renderFallback(params.params || params);
+          }
+          lastJson = current;
+        } catch (err) {
+          const status = document.getElementById('status');
+          status.textContent = String(err);
+        }
+      }, 1500);
+    }
+
+    main();
+  </script>
+</body>
+</html>

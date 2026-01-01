@@ -7,6 +7,8 @@ WEBAUDIO_ROOT ?= external/node-web-audio-api
 RT_NAME ?= faust-rt
 RT_PARAM_PATH ?= /freq
 RT_PARAM_VALUE ?= 440
+FAUST_UI_PORT ?= 8787
+FAUST_UI_ROOT ?=
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
@@ -14,18 +16,20 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt clean smoke-test run-sse run-stdio run-daw run-rt client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-set-param rt-stop
+.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-set-param rt-stop
 
 help:
 	@printf "Targets:\n"
 	@printf "  setup        Create tmp/ and install Python deps\n"
 	@printf "  setup-rt     Install node-web-audio-api deps and build native module\n"
+	@printf "  setup-ui     Install @shren/faust-ui in this repo\n"
 	@printf "  clean        Remove tmp/ and server logs\n"
 	@printf "  smoke-test   Run a basic stdio test against both servers\n"
 	@printf "  run-sse      Start the MCP server over SSE\n"
 	@printf "  run-stdio    Start the MCP server over stdio\n"
 	@printf "  run-daw      Start the DawDreamer MCP server over SSE\n"
 	@printf "  run-rt       Start the real-time MCP server over SSE\n"
+	@printf "  run-rt-ui    Start real-time MCP server with UI bridge\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
@@ -35,6 +39,7 @@ help:
 	@printf "  rt-compile    Compile/start DSP on real-time server\n"
 	@printf "  rt-get-params Get params from real-time server\n"
 	@printf "  rt-get-param  Get a param value from real-time server\n"
+	@printf "  rt-get-param-values Get all param values from real-time server\n"
 	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
 	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
@@ -52,6 +57,8 @@ help:
 	@printf "  RT_PARAM_PATH=%s\n" "$(RT_PARAM_PATH)"
 	@printf "  RT_PARAM_VALUE=%s\n" "$(RT_PARAM_VALUE)"
 	@printf "  RT_NAME=%s\n" "$(RT_NAME)"
+	@printf "  FAUST_UI_PORT=%s\n" "$(FAUST_UI_PORT)"
+	@printf "  FAUST_UI_ROOT=%s\n" "$(FAUST_UI_ROOT)"
 
 setup:
 	@mkdir -p $(TMPDIR)
@@ -59,6 +66,9 @@ setup:
 
 setup-rt:
 	cd $(WEBAUDIO_ROOT) && npm install && npm run build
+
+setup-ui:
+	cd ui && npm install
 
 clean:
 	rm -rf $(TMPDIR) faust_server.log faust_server_sse.log __pycache__
@@ -97,6 +107,11 @@ run-rt:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
 	$(PYTHON) faust_realtime_server.py
 
+run-rt-ui:
+	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
+	MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
+	$(PYTHON) faust_realtime_server.py
+
 client-rt:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive
 
@@ -108,6 +123,9 @@ rt-get-params:
 
 rt-get-param:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_param --param-path $(RT_PARAM_PATH)
+
+rt-get-param-values:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_param_values
 
 rt-set-param:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool set_param --param-path $(RT_PARAM_PATH) --param-value $(RT_PARAM_VALUE)

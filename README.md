@@ -1,6 +1,6 @@
 # Faust MCP Servers
 
-This repository provides three MCP servers that compile and analyze Faust DSP code:
+This repository provides three MCP servers that compile, render, or play Faust DSP code:
 
 - `faust_server.py`: C++ compile pipeline (Faust CLI + g++).
 - `faust_server_daw.py`: DawDreamer offline render pipeline.
@@ -20,6 +20,41 @@ This repository provides three MCP servers that compile and analyze Faust DSP co
 - `Makefile`: Common run/test targets.
 - `requirements.txt`: Client-side Python dependencies.
 
+## Architecture overview
+
+The project has three MCP server variants that share a common client interface,
+but differ in how they compile/render Faust DSP code.
+
+```mermaid
+flowchart LR
+  LLM[LLM / MCP Client] -->|SSE or stdio| MCP[MCP Server]
+
+  subgraph Server3["S3:faust_realtime_server.py"]
+    S3["MCP tool calls"] --> PY[Python MCP server]
+    PY -->|stdin/stdout JSON| NODE[faust_realtime_worker.mjs]
+    NODE --> NWA[node-web-audio-api + faustwasm]
+    NODE --> UI["Optional UI server: faust UI or fallback"]
+  end
+
+  subgraph Server2["S2:faust_server_daw.py"]
+    S2["MCP tool call"] --> DD["DawDreamer + Faust DSP"]
+    DD --> JSON2[Analysis JSON + features]
+  end
+
+  subgraph Server1["S1:faust_server.py"]
+    S1["MCP tool call"] --> CLI["faust CLI + analysis_arch.cpp"]
+    CLI --> BIN[Native C++ binary]
+    BIN --> JSON1[Analysis JSON]
+  end
+```
+
+Notes:
+
+- SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
+- The real-time server returns parameter metadata and current values, not offline analysis.
+- Real-time tools: `compile_and_start`, `get_params`, `set_param`, `get_param`, `get_param_values`, `stop`.
+- Offline tools: `compile_and_analyze`.
+
 ## Quick Start
 
 ```bash
@@ -27,16 +62,22 @@ make setup
 make smoke-test DSP=t1.dsp
 ```
 
-Cleanup:
-
-```bash
-make clean
-```
-
 Real-time setup:
 
 ```bash
 make setup-rt
+```
+
+Faust UI setup (optional):
+
+```bash
+make setup-ui
+```
+
+Cleanup:
+
+```bash
+make clean
 ```
 
 ## Shared Environment Variables
@@ -248,7 +289,7 @@ Example output (truncated):
 
 This variant compiles Faust DSP code to WebAudio on the fly and plays it in real time
 using the `node-web-audio-api` runtime. It returns parameter metadata extracted from
-the Faust JSON so an LLM can control the running DSP.
+the Faust JSON so an LLM can control the running DSP (no offline analysis metrics).
 
 [node-web-audio-api](https://github.com/ircam-ismm/node-web-audio-api) is an open-source Node.js implementation 
 of the Web Audio API that provides AudioContext/AudioWorklet support outside the browser, backed by
@@ -259,6 +300,13 @@ native audio I/O.
 - Node.js
 - `node-web-audio-api` checkout at `WEBAUDIO_ROOT` (submodule: `external/node-web-audio-api`)
 - `@grame/faustwasm` installed in that checkout
+- Optional: `@shren/faust-ui` installed in `ui/` for the UI bridge
+
+Environment variables:
+
+- `WEBAUDIO_ROOT`: node-web-audio-api path (default `external/node-web-audio-api`)
+- `FAUST_UI_PORT`: enable UI server on this port (optional)
+- `FAUST_UI_ROOT`: path to a built `faust-ui` bundle (optional, overrides auto-detect)
 
 Submodule setup (one-time):
 
@@ -285,11 +333,30 @@ MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
 python3 faust_realtime_server.py
 ```
 
+### Optional UI bridge
+
+Set `FAUST_UI_PORT` to start a small HTTP UI server (fallback sliders). If you
+have the `@shren/faust-ui` package installed (in `ui/`), the server will auto-load
+it. You can also point `FAUST_UI_ROOT` to a custom bundle directory so the page
+can load `/faust-ui/index.js` and use it instead of the fallback UI.
+
+```bash
+WEBAUDIO_ROOT=external/node-web-audio-api \
+FAUST_UI_PORT=8787 FAUST_UI_ROOT=/path/to/faust-ui/dist/esm \
+MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
+python3 faust_realtime_server.py
+```
+
+Then open:
+
+- `http://127.0.0.1:8787/`
+
 ### Real-time tools
 
 - `compile_and_start(faust_code, name?, latency_hint?)`
 - `get_params()`
 - `get_param(path)`
+- `get_param_values()`
 - `set_param(path, value)`
 - `stop()`
 
@@ -344,6 +411,24 @@ process = no.noise * gain;
 
 ## Clients
 
+## LLM + MCP usage
+
+Example flow for Claude Code or another MCP-capable LLM:
+
+1. Start the desired server (`faust_server.py`, `faust_server_daw.py`, or `faust_realtime_server.py`).
+2. The LLM connects over SSE or stdio and lists available tools.
+3. The LLM sends DSP code to `compile_and_analyze` (offline servers) or `compile_and_start` (real-time).
+4. The server returns analysis metrics (offline) or parameter metadata (real-time).
+5. The LLM uses `set_param` to adjust controls, and `get_param_values` to read back state.
+
+Minimal real-time loop (conceptual):
+
+```text
+compile_and_start(faust_code="...", name="osc1")
+get_param_values()
+set_param(path="/freq", value=440)
+```
+
 ### SSE client
 
 ```bash
@@ -367,6 +452,7 @@ python3 stdio_client_example.py --dsp t1.dsp
 
 ```bash
 make run-rt
+make run-rt-ui
 make rt-compile DSP=t1.dsp RT_NAME=osc1
 make rt-get-params
 make rt-get-param RT_PARAM_PATH=/freq

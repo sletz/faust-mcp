@@ -34,6 +34,8 @@ async def main(
                 if not param_path:
                     raise ValueError("--param-path is required for get_param")
                 args = {"path": param_path}
+            elif tool == "get_param_values":
+                args = {}
             elif tool == "set_param":
                 if not param_path or param_value is None:
                     raise ValueError("--param-path and --param-value are required for set_param")
@@ -62,7 +64,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, get_params, get_param, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, get_params, get_param, get_param_values, set_param, stop).",
     )
     parser.add_argument(
         "--name",

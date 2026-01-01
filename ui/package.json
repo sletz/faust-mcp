@@ -1,0 +1,9 @@
+{
+  "name": "faust-rt-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@shren/faust-ui": "^1.1.19"
+  }
+}

@@ -53,6 +53,7 @@ class NodeWorker:
 
         env = os.environ.copy()
         env["WEBAUDIO_ROOT"] = WEBAUDIO_ROOT
+        env.setdefault("FAUST_MCP_ROOT", os.path.abspath(os.path.dirname(__file__)))
 
         self._proc = subprocess.Popen(
             ["node", WORKER_PATH],
@@ -152,6 +153,14 @@ def get_param(path: str) -> str:
     """Get the current value of a parameter on the running DSP."""
 
     result = worker.request("get_param", {"path": path})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_param_values() -> str:
+    """Get current values for all parameters on the running DSP."""
+
+    result = worker.request("get_param_values")
     return json.dumps(result, indent=2)
 
 

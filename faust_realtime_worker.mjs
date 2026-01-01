@@ -14,10 +14,16 @@
 
 import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import path from 'node:path';
+import http from 'node:http';
+import fs from 'node:fs';
 
 // Base path to the node-web-audio-api checkout (default: submodule).
 const WEB_AUDIO_ROOT = process.env.WEBAUDIO_ROOT || 'external/node-web-audio-api';
+const UI_PORT = Number(process.env.FAUST_UI_PORT || 0);
+const UI_ROOT = process.env.FAUST_UI_ROOT || '';
+const MCP_ROOT = process.env.FAUST_MCP_ROOT || process.cwd();
 
 // Ensure native bindings are resolved relative to the node-web-audio-api checkout.
 // The native .node bindings are loaded by CJS and expect process.cwd() to match.
@@ -48,6 +54,8 @@ let audioContext = null;
 let faustNode = null;
 let faustJson = null;
 let paramsCache = [];
+let uiServer = null;
+let dspName = null;
 
 /**
  * Initialize libfaust compiler and WebAudio classes (lazy).
@@ -183,6 +191,7 @@ async function compileAndStart({ dsp_code, name, latency_hint }) {
   // Extract UI metadata and parameter paths from Faust JSON.
   const jsonStr = faustNode.getJSON();
   faustJson = JSON.parse(jsonStr);
+  dspName = faustJson?.name || name || null;
   paramsCache = extractParamsFromJson(faustJson);
 
   const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
@@ -240,6 +249,19 @@ async function getParams() {
 }
 
 /**
+ * Return current values for all known parameters.
+ */
+async function getParamValues() {
+  ensureRunning();
+  const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
+  const values = paramPaths.map((path) => ({
+    path,
+    value: faustNode.getParamValue(path),
+  }));
+  return { status: 'ok', values };
+}
+
+/**
  * Stop playback and reset state.
  */
 async function stop() {
@@ -261,13 +283,101 @@ async function stop() {
   return { status: 'stopped' };
 }
 
+function resolveUiRoot() {
+  if (UI_ROOT) return UI_ROOT;
+  try {
+    const require = createRequire(path.join(MCP_ROOT, 'ui', 'package.json'));
+    const uiFile = require.resolve('@shren/faust-ui/dist/esm/index.js');
+    return path.dirname(uiFile);
+  } catch (_) {
+    return '';
+  }
+}
+
+function startUiServer() {
+  if (!UI_PORT || uiServer) return;
+  const uiHtmlPath = path.join(MCP_ROOT, 'ui', 'rt-ui.html');
+  const resolvedUiRoot = resolveUiRoot();
+
+  uiServer = http.createServer((req, res) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+    if (url.pathname === '/') {
+      const html = fs.readFileSync(uiHtmlPath, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+      return;
+    }
+
+    if (url.pathname === '/params') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ params: paramsCache }));
+      return;
+    }
+
+    if (url.pathname === '/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ name: dspName, running: !!faustNode }));
+      return;
+    }
+
+    if (url.pathname === '/json') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(faustJson || {}));
+      return;
+    }
+
+    if (url.pathname === '/param' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', async () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          if (!data.path) throw new Error('Missing path');
+          if (typeof data.value !== 'number') throw new Error('Missing value');
+          await setParam({ path: data.path, value: data.value });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok' }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+      });
+      return;
+    }
+
+    if (url.pathname.startsWith('/faust-ui/') && resolvedUiRoot) {
+      const rel = url.pathname.replace('/faust-ui/', '');
+      const filePath = path.join(resolvedUiRoot, rel);
+      if (fs.existsSync(filePath)) {
+        const contentType = filePath.endsWith('.css')
+          ? 'text/css'
+          : 'application/javascript';
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(fs.readFileSync(filePath));
+      } else {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+      return;
+    }
+
+    res.writeHead(404);
+    res.end('Not found');
+  });
+
+  uiServer.listen(UI_PORT);
+}
+
 const handlers = {
   compile_and_start: compileAndStart,
   set_param: setParam,
   get_param: getParam,
   get_params: getParams,
+  get_param_values: getParamValues,
   stop,
 };
+
+startUiServer();
 
 // Minimal JSON-over-stdin protocol for the Python MCP server.
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
