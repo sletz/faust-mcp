@@ -7,7 +7,20 @@
   <link rel="stylesheet" href="/faust-ui/index.css" />
   <style>
     :root { color-scheme: light; }
-    body { font-family: Arial, sans-serif; margin: 24px; }
+    html, body { height: 100%; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .page {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 20px 24px;
+    }
     h1 { margin-bottom: 8px; text-align: center; }
     .status { color: #444; margin-bottom: 16px; display: none; text-align: center; }
     .param { margin: 10px 0; }
@@ -18,31 +31,34 @@
     #fallback-ui .param { display: inline-block; text-align: left; margin: 10px 12px; }
     #faust-ui-container {
       margin-top: 16px;
-      max-width: 100%;
-      max-height: calc(100vh - 180px);
-      overflow: auto;
-      border-radius: 6px;
+      flex: 1 1 auto;
+      min-height: 0;
+      position: relative;
       display: flex;
-      justify-content: center;
-      align-items: flex-start;
+      border-radius: 6px;
     }
     #faust-ui-root {
-      --faust-ui-scale: 1.6;
-      transform: scale(var(--faust-ui-scale));
-      transform-origin: top left;
-      width: fit-content;
+      position: absolute;
+      inset: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
     }
     #dsp-name { font-weight: 600; margin-top: 4px; text-align: center; }
   </style>
 </head>
 <body>
-  <h1>Faust Real-time UI</h1>
-  <div class="status" id="status">Loading...</div>
-  <div id="dsp-name"></div>
-  <div id="faust-ui-container">
-    <div id="faust-ui-root"></div>
+  <div class="page">
+    <h1>Faust Real-time UI</h1>
+    <div class="status" id="status">Loading...</div>
+    <div id="dsp-name"></div>
+    <div id="faust-ui-container">
+      <div id="faust-ui-root"></div>
+    </div>
+    <div id="fallback-ui"></div>
   </div>
-  <div id="fallback-ui"></div>
 
   <script type="module">
     async function fetchJson(path) {
@@ -98,6 +114,7 @@
           root,
           ui: faustJson.ui || [],
           listenWindowMessage: false,
+          listenWindowResize: true,
         });
         ui.paramChangeByUI = async (path, value) => {
           await setParam(path, value);
@@ -105,7 +122,11 @@
         if (ui && typeof ui.mount === 'function') {
           ui.mount();
         }
-        requestAnimationFrame(updateFaustUiScale);
+        root.style.minWidth = `${ui.minWidth}px`;
+        root.style.minHeight = `${ui.minHeight}px`;
+        if (typeof ui.resize === 'function') {
+          ui.resize();
+        }
         return true;
       } catch (err) {
         console.error('Failed to load faust-ui module', err);
@@ -113,24 +134,6 @@
         status.textContent = `faust-ui load failed: ${err}`;
         return false;
       }
-    }
-
-    const FIXED_UI_SCALE = 1.6;
-
-    function updateFaustUiScale() {
-      const root = document.getElementById('faust-ui-root');
-      const container = document.getElementById('faust-ui-container');
-      if (!root) return;
-      const padding = 32;
-      root.style.setProperty('--faust-ui-scale', '1');
-      const contentWidth = Math.max(root.scrollWidth, root.offsetWidth);
-      const contentHeight = Math.max(root.scrollHeight, root.offsetHeight);
-      const availableWidth = (container?.clientWidth || window.innerWidth) - padding;
-      const availableHeight = (container?.clientHeight || window.innerHeight) - padding;
-      const widthScale = contentWidth ? availableWidth / contentWidth : FIXED_UI_SCALE;
-      const heightScale = contentHeight ? availableHeight / contentHeight : FIXED_UI_SCALE;
-      const scale = Math.min(FIXED_UI_SCALE, widthScale, heightScale);
-      root.style.setProperty('--faust-ui-scale', scale.toFixed(3));
     }
 
     async function renderOnce() {
@@ -153,8 +156,6 @@
     }
 
     async function main() {
-      updateFaustUiScale();
-      window.addEventListener('resize', () => requestAnimationFrame(updateFaustUiScale));
       let lastJson = await renderOnce();
       setInterval(async () => {
         try {
