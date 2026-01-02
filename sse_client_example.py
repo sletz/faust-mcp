@@ -17,6 +17,9 @@ async def main(
     dsp_path: str | None,
     name: str | None,
     latency_hint: str | None,
+    input_source: str | None,
+    input_freq: float | None,
+    input_file: str | None,
     param_path: str | None,
     param_value: float | None,
 ) -> None:
@@ -35,6 +38,13 @@ async def main(
                 with open(dsp_path, "r", encoding="utf-8") as f:
                     dsp = f.read()
                 args = {"faust_code": dsp}
+                if tool in ("compile_and_analyze", "compile_and_start"):
+                    if input_source is not None:
+                        args["input_source"] = input_source
+                    if input_freq is not None:
+                        args["input_freq"] = input_freq
+                    if input_file is not None:
+                        args["input_file"] = input_file
                 if tool == "compile_and_start":
                     if name:
                         args["name"] = name
@@ -89,6 +99,22 @@ if __name__ == "__main__":
         help="Latency hint for compile_and_start (interactive or playback).",
     )
     parser.add_argument(
+        "--input-source",
+        default=None,
+        help="Input source for compile_and_analyze/compile_and_start (none, sine, noise, file). DawDreamer/RT servers only.",
+    )
+    parser.add_argument(
+        "--input-freq",
+        default=None,
+        type=float,
+        help="Input frequency in Hz for sine test input (DawDreamer/RT only).",
+    )
+    parser.add_argument(
+        "--input-file",
+        default=None,
+        help="Input file path for file test input (DawDreamer/RT only).",
+    )
+    parser.add_argument(
         "--param-path",
         default=None,
         help="Parameter path for get_param/set_param.",
@@ -114,6 +140,9 @@ if __name__ == "__main__":
         args.dsp,
         args.name,
         args.latency,
+        args.input_source,
+        args.input_freq,
+        args.input_file,
         args.param_path,
         args.param_value,
     )

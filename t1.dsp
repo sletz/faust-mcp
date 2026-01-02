@@ -1,6 +1,6 @@
 import("stdfaust.lib");
 
-freq = hslider("freq[Hz]", 500, 50, 2000, 1);
-gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
+cutoff = hslider("cutoff[Hz]", 1200, 50, 8000, 1);
+drive = hslider("drive[dB]", 0, -24, 24, 0.1) : ba.db2linear;
 
-process = os.osc(freq) * gain;
+process = _ * drive : fi.lowpass(2, cutoff);

@@ -54,6 +54,7 @@ Notes:
 - The real-time server returns parameter metadata and current values, not offline analysis.
 - Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `get_param`, `get_param_values`, `stop`.
 - Offline tools: `compile_and_analyze`.
+- DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
 ## Quick Start
 
@@ -123,6 +124,12 @@ Default SSE endpoint:
 
 ```bash
 MCP_TRANSPORT=stdio python3 faust_server.py
+```
+
+For `faust_server.py`, set `TMPDIR` to a writable path if compilation fails:
+
+```bash
+MCP_TRANSPORT=stdio TMPDIR=/tmp/faust-mcp-test python3 faust_server.py
 ```
 
 ### Tool: compile_and_analyze
@@ -196,6 +203,13 @@ python3 -m pip install dawDreamer
 - `DD_SAMPLE_RATE`, `DD_BLOCK_SIZE`, `DD_RENDER_SECONDS` for rendering
 - `DD_FFT_SIZE`, `DD_FFT_HOP`, `DD_ROLLOFF` for spectral analysis
 
+### Tool additions
+
+`compile_and_analyze` accepts optional `input_source` (`none`, `sine`, `noise`, `file`),
+`input_freq` (Hz for sine, default 1000), and `input_file` (path for file) to inject
+test inputs for effects. For DawDreamer, `input_file` must be a local WAV path
+and requires `numpy` for decoding.
+
 ### Run (SSE)
 
 ```bash
@@ -216,6 +230,13 @@ that DSP file. You can also use:
 
 ```bash
 make client-sse DSP=t1.dsp
+```
+
+`compile_and_analyze` with a test input source (DawDreamer):
+
+```bash
+python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
+  --tool compile_and_analyze --dsp t1.dsp --input-source noise
 ```
 
 ### DawDreamer output additions
@@ -353,7 +374,7 @@ Then open:
 
 ### Real-time tools
 
-- `compile_and_start(faust_code, name?, latency_hint?)`
+- `compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?)`
 - `check_syntax(faust_code, name?)`
 - `get_params()`
 - `get_param(path)`
@@ -362,6 +383,16 @@ Then open:
 - `stop()`
 
 `latency_hint` accepts `interactive` (default) or `playback`.
+`input_source` accepts `none` (default), `sine`, `noise`, or `file`. `input_freq`
+sets the sine frequency in Hz (default 1000). `input_file` sets the path for a
+soundfile input when `input_source=file`.
+
+For the real-time server (faustwasm), soundfiles must be served over HTTP/HTTPS.
+To test local files, start a simple server in the repo root:
+
+```bash
+python3 -m http.server 9000
+```
 
 ### Python ↔ Node worker bridge
 
@@ -382,10 +413,10 @@ The real-time server runs a Node worker process and talks to it over stdin/stdou
 ```faust
 import("stdfaust.lib");
 
-freq = hslider("freq[Hz]", 500, 50, 2000, 1);
-gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
+cutoff = hslider("cutoff[Hz]", 1200, 50, 8000, 1);
+drive = hslider("drive[dB]", 0, -24, 24, 0.1) : ba.db2linear;
 
-process = os.osc(freq) * gain;
+process = _ * drive : fi.lowpass(2, cutoff);
 ```
 
 `t2.dsp`:
@@ -430,6 +461,45 @@ get_param_values()
 set_param(path="/freq", value=440)
 ```
 
+## Typical use cases
+
+Local file server for soundfile inputs:
+
+```bash
+python3 -m http.server 9000
+```
+
+Offline analysis with a sine test input (DawDreamer):
+
+```bash
+make run-daw
+make client-daw DSP=t1.dsp INPUT_SOURCE=sine INPUT_FREQ=1000
+```
+
+Offline analysis with a soundfile test input (DawDreamer, local path):
+
+```bash
+make run-daw
+make client-daw DSP=t1.dsp INPUT_SOURCE=file INPUT_FILE=tests/assets/sine.wav
+```
+
+If you see `addSoundfile : soundfile for sound cannot be created`, make sure the
+path points to a local WAV file (HTTP URLs are for the real-time server).
+
+Real-time compile with noise test input:
+
+```bash
+make run-rt
+make rt-compile DSP=t1.dsp RT_NAME=fx INPUT_SOURCE=noise
+```
+
+Real-time compile with a soundfile test input (HTTP URL):
+
+```bash
+make run-rt-ui
+make rt-compile DSP=t1.dsp RT_NAME=fx INPUT_SOURCE=file INPUT_FILE=http://127.0.0.1:9000/tests/assets/sine.wav
+```
+
 ### SSE client
 
 ```bash
@@ -443,10 +513,61 @@ python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
   --tool compile_and_start --dsp t1.dsp --name osc1 --latency interactive
 ```
 
+With a test input source:
+
+```bash
+python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
+  --tool compile_and_start --dsp t1.dsp --name osc1 --latency interactive \
+  --input-source sine --input-freq 1000
+```
+
+With a file test input:
+
+```bash
+python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
+  --tool compile_and_start --dsp t1.dsp --name osc1 --latency interactive \
+  --input-source file --input-file http://127.0.0.1:9000/tests/assets/sine.wav
+```
+
+`tests/assets/sine.wav` is a mono 1 kHz test file included in this repo.
+
 ### stdio client
 
 ```bash
 python3 stdio_client_example.py --dsp t1.dsp
+```
+
+Real-time over stdio:
+
+```bash
+MCP_TRANSPORT=stdio python3 faust_realtime_server.py
+```
+
+```bash
+python3 stdio_client_example.py --server faust_realtime_server.py \
+  --tool compile_and_start --dsp t1.dsp --name fx --latency interactive \
+  --input-source noise
+```
+
+## Local verification checklist
+
+These commands exercise the common server/client combinations on a local machine:
+
+```bash
+# C++ server (stdio)
+python3 stdio_client_example.py --server faust_server.py --dsp t1.dsp --tmpdir /tmp/faust-mcp-test
+
+# DawDreamer server (stdio, file input)
+python3 stdio_client_example.py --server faust_server_daw.py --dsp t1.dsp \
+  --input-source file --input-file tests/assets/sine.wav
+
+# Real-time server (SSE)
+WEBAUDIO_ROOT=external/node-web-audio-api MCP_PORT=8000 \
+python3 faust_realtime_server.py
+
+python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
+  --tool compile_and_start --dsp t1.dsp --name fx --latency interactive \
+  --input-source noise
 ```
 
 ### Makefile real-time helpers

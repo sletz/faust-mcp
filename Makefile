@@ -9,6 +9,9 @@ RT_PARAM_PATH ?= /freq
 RT_PARAM_VALUE ?= 440
 FAUST_UI_PORT ?= 8787
 FAUST_UI_ROOT ?=
+INPUT_SOURCE ?=
+INPUT_FREQ ?=
+INPUT_FILE ?=
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
@@ -59,6 +62,9 @@ help:
 	@printf "  RT_NAME=%s\n" "$(RT_NAME)"
 	@printf "  FAUST_UI_PORT=%s\n" "$(FAUST_UI_PORT)"
 	@printf "  FAUST_UI_ROOT=%s\n" "$(FAUST_UI_ROOT)"
+	@printf "  INPUT_SOURCE=%s\n" "$(INPUT_SOURCE)"
+	@printf "  INPUT_FREQ=%s\n" "$(INPUT_FREQ)"
+	@printf "  INPUT_FILE=%s\n" "$(INPUT_FILE)"
 
 setup:
 	@mkdir -p $(TMPDIR)
@@ -101,7 +107,10 @@ client-daw:
 	@mkdir -p $(TMPDIR)
 	DD_SAMPLE_RATE=$(DD_SAMPLE_RATE) DD_BLOCK_SIZE=$(DD_BLOCK_SIZE) DD_RENDER_SECONDS=$(DD_RENDER_SECONDS) \
 	DD_FFT_SIZE=$(DD_FFT_SIZE) DD_FFT_HOP=$(DD_FFT_HOP) DD_ROLLOFF=$(DD_ROLLOFF) \
-	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --dsp $(DSP) --tmpdir $(TMPDIR)
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --dsp $(DSP) --tmpdir $(TMPDIR) \
+		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
+		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
+		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),)
 
 run-rt:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
@@ -113,10 +122,16 @@ run-rt-ui:
 	$(PYTHON) faust_realtime_server.py
 
 client-rt:
-	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
+		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
+		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
+		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),)
 
 rt-compile:
-	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
+		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
+		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
+		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),)
 
 rt-get-params:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_params

@@ -3,6 +3,7 @@ import json
 import math
 import os
 import importlib.metadata
+import wave
 
 try:
     import dawDreamer as dd
@@ -28,6 +29,46 @@ RENDER_SECONDS = float(os.environ.get("DD_RENDER_SECONDS", "2.0"))
 FFT_SIZE = int(os.environ.get("DD_FFT_SIZE", "2048"))
 FFT_HOP = int(os.environ.get("DD_FFT_HOP", str(max(1, FFT_SIZE // 2))))
 ROLLOFF_RATIO = float(os.environ.get("DD_ROLLOFF", "0.85"))
+
+
+def _wrap_test_inputs(faust_code, input_source, input_freq, input_file):
+    source = (input_source or "none").strip().lower()
+    if source == "none":
+        return faust_code
+    if source not in ("sine", "noise", "file"):
+        raise ValueError(f"Unsupported input_source: {input_source}")
+
+    extra_lines = []
+    if source == "sine":
+        freq = 1000.0 if input_freq is None else float(input_freq)
+        signal = f'library("oscillators.lib").osc({freq:g})'
+    elif source == "file":
+        if not input_file:
+            raise ValueError("input_file is required for input_source=file")
+        escaped = str(input_file).replace("\\", "\\\\").replace("'", "\\'")
+        extra_lines = [
+            'mcp_so = library("soundfiles.lib");',
+            f'mcp_sf = soundfile("sound[url:{{\'{escaped}\'}}]", 1);',
+            "mcp_loop_test = mcp_so.loop(mcp_sf, 0);",
+        ]
+        signal = "mcp_loop_test"
+    else:
+        signal = 'library("noises.lib").noise'
+
+    indented = "\n".join(
+        f"  {line}" if line.strip() else line for line in faust_code.splitlines()
+    )
+    return "\n".join(
+        [
+            'import("stdfaust.lib");',
+            "mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;",
+            *extra_lines,
+            "mcp_dsp = environment {",
+            indented,
+            "};",
+            f"process = mcp_addTestInputs(mcp_dsp.process, {signal});",
+        ]
+    )
 
 
 def _create_faust_processor(engine, name, faust_code, sample_rate):
@@ -243,6 +284,35 @@ def _compute_features(buffer, sample_rate):
     return features
 
 
+def _load_wav_audio(path):
+    if np is None:
+        raise RuntimeError("numpy is required for input_source=file")
+
+    with wave.open(path, "rb") as wf:
+        channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        frames = wf.readframes(wf.getnframes())
+
+    if sampwidth == 1:
+        dtype = np.uint8
+        data = np.frombuffer(frames, dtype=dtype).astype(np.float32)
+        data = (data - 128.0) / 128.0
+    elif sampwidth == 2:
+        dtype = np.int16
+        data = np.frombuffer(frames, dtype=dtype).astype(np.float32) / 32768.0
+    elif sampwidth == 4:
+        dtype = np.int32
+        data = np.frombuffer(frames, dtype=dtype).astype(np.float32) / 2147483648.0
+    else:
+        raise RuntimeError(f"Unsupported WAV sample width: {sampwidth}")
+
+    if channels > 1:
+        data = data.reshape(-1, channels).T
+    else:
+        data = data.reshape(1, -1)
+    return data
+
+
 def _metrics_from_buffer(buffer):
     if np is not None and isinstance(buffer, np.ndarray):
         max_amp = float(np.max(np.abs(buffer))) if buffer.size else 0.0
@@ -277,10 +347,18 @@ def _to_channels(audio):
 
 
 @mcp.tool()
-def compile_and_analyze(faust_code: str) -> str:
+def compile_and_analyze(
+    faust_code: str,
+    input_source: str = "none",
+    input_freq: float | None = None,
+    input_file: str | None = None,
+) -> str:
     """
     Compile Faust code with DawDreamer, render offline audio, and analyze signal.
     Returns global and per-channel metrics as JSON.
+
+    input_source: "none" (default), "sine", "noise", or "file". When set, the
+    DSP is wrapped with test inputs (sine uses input_freq, file uses input_file).
     """
 
     if dd is None:
@@ -288,7 +366,33 @@ def compile_and_analyze(faust_code: str) -> str:
 
     try:
         engine = dd.RenderEngine(SAMPLE_RATE, BLOCK_SIZE)
-        processor = _create_faust_processor(engine, "faust", faust_code, SAMPLE_RATE)
+        wrapped_code = _wrap_test_inputs(faust_code, input_source, input_freq, input_file)
+        if input_source == "file":
+            if not input_file:
+                raise RuntimeError("input_file is required for input_source=file")
+            if str(input_file).startswith(("http://", "https://")):
+                raise RuntimeError(
+                    "DawDreamer requires a local file path for input_source=file."
+                )
+            audio = _load_wav_audio(input_file)
+            if hasattr(engine, "make_faust_processor"):
+                processor = engine.make_faust_processor("faust")
+                if not processor.set_dsp_string(wrapped_code):
+                    raise RuntimeError("Failed to set Faust DSP string")
+                processor.set_soundfiles({"sound": [audio]})
+                if not processor.compile():
+                    raise RuntimeError("Failed to compile Faust DSP")
+            elif hasattr(engine, "makeFaustProcessor"):
+                processor = engine.makeFaustProcessor("faust")
+                if not processor.set_dsp_string(wrapped_code):
+                    raise RuntimeError("Failed to set Faust DSP string")
+                processor.set_soundfiles({"sound": [audio]})
+                if not processor.compile():
+                    raise RuntimeError("Failed to compile Faust DSP")
+            else:
+                raise RuntimeError("No Faust processor factory found in dawDreamer")
+        else:
+            processor = _create_faust_processor(engine, "faust", wrapped_code, SAMPLE_RATE)
         _load_graph(engine, processor)
         engine.render(RENDER_SECONDS)
         audio = engine.get_audio()

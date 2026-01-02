@@ -84,7 +84,10 @@ int main(int argc, char* argv[])
     // We only support generators (0 inputs) for this simplified test
     // or simple effects processing silence
     float** input_buffers = new float*[inputs];
-    for (int i = 0; i < inputs; i++) input_buffers[i] = new float[samples]; // Zero init usually
+    for (int i = 0; i < inputs; i++) {
+        input_buffers[i] = new float[samples];
+        std::fill(input_buffers[i], input_buffers[i] + samples, 0.0f);
+    }
     
     float** output_buffers = new float*[outputs];
     for (int i = 0; i < outputs; i++) output_buffers[i] = new float[samples];

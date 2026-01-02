@@ -57,6 +57,51 @@ let paramsCache = [];
 let uiServer = null;
 let dspName = null;
 
+function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
+  const source = (inputSource || 'none').trim().toLowerCase();
+  if (source === 'none') {
+    return dspCode;
+  }
+  if (source !== 'sine' && source !== 'noise' && source !== 'file') {
+    throw new Error(`Unsupported input_source: ${inputSource}`);
+  }
+
+  let extraLines = [];
+  let signal;
+  if (source === 'sine') {
+    const freq = Number.isFinite(inputFreq) ? inputFreq : 1000;
+    signal = `library("oscillators.lib").osc(${freq})`;
+  } else if (source === 'file') {
+    if (!inputFile) {
+      throw new Error('input_file is required for input_source=file');
+    }
+    const escaped = String(inputFile).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    extraLines = [
+      'mcp_so = library("soundfiles.lib");',
+      `mcp_sf = soundfile("sound[url:{'${escaped}'}]", 1);`,
+      'mcp_loop_test = mcp_so.loop(mcp_sf, 0);',
+    ];
+    signal = 'mcp_loop_test';
+  } else {
+    signal = 'library("noises.lib").noise';
+  }
+
+  const indented = String(dspCode)
+    .split('\n')
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join('\n');
+
+  return [
+    'import("stdfaust.lib");',
+    'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;',
+    ...extraLines,
+    'mcp_dsp = environment {',
+    indented,
+    '};',
+    `process = mcp_addTestInputs(mcp_dsp.process, ${signal});`,
+  ].join('\n');
+}
+
 /**
  * Initialize libfaust compiler and WebAudio classes (lazy).
  */
@@ -181,7 +226,14 @@ async function checkSyntax({ dsp_code, name, args }) {
 /**
  * Compile DSP code, start playback, and return JSON + param metadata.
  */
-async function compileAndStart({ dsp_code, name, latency_hint }) {
+async function compileAndStart({
+  dsp_code,
+  name,
+  latency_hint,
+  input_source,
+  input_freq,
+  input_file,
+}) {
   // Compile DSP, create AudioWorklet node, connect, and start.
   await initFaust();
 
@@ -203,7 +255,8 @@ async function compileAndStart({ dsp_code, name, latency_hint }) {
   audioContext = new AudioContext({ latencyHint: hint });
 
   const generator = new FaustMonoDspGenerator();
-  const compiled = await generator.compile(compiler, name, dsp_code, '-ftz 2');
+  const wrappedCode = wrapTestInputs(dsp_code, input_source, input_freq, input_file);
+  const compiled = await generator.compile(compiler, name, wrappedCode, '-ftz 2');
   if (!compiled) {
     throw new Error('Faust compilation failed');
   }

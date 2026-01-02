@@ -6,7 +6,7 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 (`faust_realtime_worker.mjs`) and communicates via a JSON-over-stdin protocol.
 
 Tools:
-  - compile_and_start(faust_code, name?, latency_hint?)
+  - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?)
   - check_syntax(faust_code, name?)
   - get_params()
   - get_param(path)
@@ -135,14 +135,31 @@ def check_syntax(faust_code: str, name: str = "faust-check") -> str:
 
 
 @mcp.tool()
-def compile_and_start(faust_code: str, name: str = "faust-rt", latency_hint: str = "interactive") -> str:
+def compile_and_start(
+    faust_code: str,
+    name: str = "faust-rt",
+    latency_hint: str = "interactive",
+    input_source: str = "none",
+    input_freq: float | None = None,
+    input_file: str | None = None,
+) -> str:
     """
     Compile Faust DSP code, start real-time audio, and return parameter metadata.
+
+    input_source: "none" (default), "sine", "noise", or "file". When set, the
+    DSP is wrapped with test inputs (sine uses input_freq, file uses input_file).
     """
 
     result = worker.request(
         "compile_and_start",
-        {"dsp_code": faust_code, "name": name, "latency_hint": latency_hint},
+        {
+            "dsp_code": faust_code,
+            "name": name,
+            "latency_hint": latency_hint,
+            "input_source": input_source,
+            "input_freq": input_freq,
+            "input_file": input_file,
+        },
     )
     return json.dumps(result, indent=2)
 
