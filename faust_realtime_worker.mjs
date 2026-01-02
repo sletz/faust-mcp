@@ -56,32 +56,31 @@ let faustJson = null;
 let paramsCache = [];
 let uiServer = null;
 let dspName = null;
+let fileSourceNode = null;  // For file input playback
 
 function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
   const source = (inputSource || 'none').trim().toLowerCase();
   if (source === 'none') {
-    return dspCode;
+    return { code: dspCode, useExternalInput: false };
   }
   if (source !== 'sine' && source !== 'noise' && source !== 'file') {
     throw new Error(`Unsupported input_source: ${inputSource}`);
   }
 
-  let extraLines = [];
+  // For file input, we'll connect an AudioBufferSourceNode externally
+  // So just pass through the original DSP code (it should have inputs)
+  if (source === 'file') {
+    if (!inputFile) {
+      throw new Error('input_file is required for input_source=file');
+    }
+    return { code: dspCode, useExternalInput: true, inputFile };
+  }
+
+  // For sine/noise, wrap the DSP with test signal generator
   let signal;
   if (source === 'sine') {
     const freq = Number.isFinite(inputFreq) ? inputFreq : 1000;
     signal = `library("oscillators.lib").osc(${freq})`;
-  } else if (source === 'file') {
-    if (!inputFile) {
-      throw new Error('input_file is required for input_source=file');
-    }
-    const escaped = String(inputFile).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    extraLines = [
-      'mcp_so = library("soundfiles.lib");',
-      `mcp_sf = soundfile("sound[url:{'${escaped}'}]", 1);`,
-      'mcp_loop_test = mcp_so.loop(mcp_sf, 0);',
-    ];
-    signal = 'mcp_loop_test';
   } else {
     signal = 'library("noises.lib").noise';
   }
@@ -91,15 +90,16 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     .map((line) => (line.trim() ? `  ${line}` : line))
     .join('\n');
 
-  return [
+  const wrappedCode = [
     'import("stdfaust.lib");',
     'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;',
-    ...extraLines,
     'mcp_dsp = environment {',
     indented,
     '};',
     `process = mcp_addTestInputs(mcp_dsp.process, ${signal});`,
   ].join('\n');
+
+  return { code: wrappedCode, useExternalInput: false };
 }
 
 /**
@@ -240,6 +240,12 @@ async function compileAndStart({
   if (audioContext) {
     // Replace the running DSP.
     try {
+      if (fileSourceNode) {
+        fileSourceNode.stop();
+        fileSourceNode = null;
+      }
+    } catch (_) {}
+    try {
       if (faustNode) {
         faustNode.stop();
       }
@@ -255,8 +261,8 @@ async function compileAndStart({
   audioContext = new AudioContext({ latencyHint: hint });
 
   const generator = new FaustMonoDspGenerator();
-  const wrappedCode = wrapTestInputs(dsp_code, input_source, input_freq, input_file);
-  const compiled = await generator.compile(compiler, name, wrappedCode, '-ftz 2');
+  const wrapped = wrapTestInputs(dsp_code, input_source, input_freq, input_file);
+  const compiled = await generator.compile(compiler, name, wrapped.code, '-ftz 2');
   if (!compiled) {
     throw new Error('Faust compilation failed');
   }
@@ -267,6 +273,35 @@ async function compileAndStart({
   }
 
   faustNode.connect(audioContext.destination);
+
+  // Handle file input: load audio file and connect to FAUST input
+  if (wrapped.useExternalInput && wrapped.inputFile) {
+    try {
+      // Read audio file
+      const fileBuffer = fs.readFileSync(wrapped.inputFile);
+      const arrayBuffer = fileBuffer.buffer.slice(
+        fileBuffer.byteOffset,
+        fileBuffer.byteOffset + fileBuffer.byteLength
+      );
+
+      // Decode audio data
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // Create looping source node
+      fileSourceNode = audioContext.createBufferSource();
+      fileSourceNode.buffer = audioBuffer;
+      fileSourceNode.loop = true;
+
+      // Connect file source -> FAUST effect -> destination
+      fileSourceNode.connect(faustNode);
+      fileSourceNode.start();
+
+      console.error(`Loaded audio file: ${wrapped.inputFile} (${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.sampleRate}Hz)`);
+    } catch (err) {
+      throw new Error(`Failed to load audio file: ${err.message}`);
+    }
+  }
+
   faustNode.start();
 
   // Extract UI metadata and parameter paths from Faust JSON.
@@ -347,6 +382,12 @@ async function getParamValues() {
  */
 async function stop() {
   // Stop audio and reset state.
+  if (fileSourceNode) {
+    try {
+      fileSourceNode.stop();
+    } catch (_) {}
+    fileSourceNode = null;
+  }
   if (faustNode) {
     try {
       faustNode.stop();
