@@ -21,6 +21,7 @@ Runtime notes:
 """
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 import json
 import os
 import subprocess
@@ -32,16 +33,24 @@ MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
 WEBAUDIO_ROOT = os.environ.get(
     "WEBAUDIO_ROOT",
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "external", "node-web-audio-api")),
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "external", "node-web-audio-api")
+    ),
 )
 
 WORKER_PATH = os.path.abspath("faust_realtime_worker.mjs")
 
-mcp = FastMCP("Faust-RT-Runner", host=MCP_HOST, port=MCP_PORT)
+mcp = FastMCP(
+    "Faust-RT-Runner",
+    host=MCP_HOST,
+    port=MCP_PORT,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 class NodeWorker:
     """Manages the Node worker lifecycle and request/response I/O."""
+
     def __init__(self) -> None:
         self._proc: subprocess.Popen[str] | None = None
         self._next_id = 1

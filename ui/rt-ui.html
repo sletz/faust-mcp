@@ -75,9 +75,13 @@
       });
     }
 
+    const fallbackControls = new Map();
+    let faustUiInstance = null;
+
     function renderFallback(params) {
       const container = document.getElementById('fallback-ui');
       container.innerHTML = '';
+      fallbackControls.clear();
       params.forEach((param) => {
         const wrap = document.createElement('div');
         wrap.className = 'param';
@@ -98,6 +102,30 @@
         });
         wrap.append(label, input, value);
         container.append(wrap);
+        fallbackControls.set(param.path, { input, value });
+      });
+    }
+
+    async function fetchParamValues() {
+      const res = await fetch('/param-values');
+      if (!res.ok) return null;
+      return res.json();
+    }
+
+    function applyParamValues(values) {
+      if (!values || !Array.isArray(values)) return;
+      values.forEach((entry) => {
+        if (!entry) return;
+        const path = entry.path;
+        const value = entry.value;
+        if (faustUiInstance) {
+          faustUiInstance.paramChangeByDSP(path, value);
+        }
+        const fallback = fallbackControls.get(path);
+        if (fallback) {
+          fallback.input.value = value;
+          fallback.value.textContent = value;
+        }
       });
     }
 
@@ -127,11 +155,13 @@
         if (typeof ui.resize === 'function') {
           ui.resize();
         }
+        faustUiInstance = ui;
         return true;
       } catch (err) {
         console.error('Failed to load faust-ui module', err);
         const status = document.getElementById('status');
         status.textContent = `faust-ui load failed: ${err}`;
+        faustUiInstance = null;
         return false;
       }
     }
@@ -148,6 +178,8 @@
         if (!usedFaustUI) {
           renderFallback(params.params || params);
         }
+        const values = await fetchParamValues();
+        applyParamValues(values?.values);
         return JSON.stringify({ name: statusJson.name, json });
       } catch (err) {
         status.textContent = String(err);
@@ -162,21 +194,22 @@
           const json = await fetchJson('/json');
           const statusJson = await fetchJson('/status');
           const current = JSON.stringify({ name: statusJson.name, json });
-          if (current && current === lastJson) {
-            return;
+          if (current && current !== lastJson) {
+            const params = await fetchJson('/params');
+            const dspName = document.getElementById('dsp-name');
+            dspName.textContent = statusJson.name ? `DSP: ${statusJson.name}` : 'DSP: (none)';
+            const usedFaustUI = await tryFaustUI(json, params.params || params);
+            if (!usedFaustUI) {
+              renderFallback(params.params || params);
+            }
+            lastJson = current;
           }
-          const params = await fetchJson('/params');
-          const dspName = document.getElementById('dsp-name');
-          dspName.textContent = statusJson.name ? `DSP: ${statusJson.name}` : 'DSP: (none)';
-          const usedFaustUI = await tryFaustUI(json, params.params || params);
-          if (!usedFaustUI) {
-            renderFallback(params.params || params);
-          }
-          lastJson = current;
         } catch (err) {
           const status = document.getElementById('status');
           status.textContent = String(err);
         }
+        const values = await fetchParamValues();
+        applyParamValues(values?.values);
       }, 1500);
     }
 

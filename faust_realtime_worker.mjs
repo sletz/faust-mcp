@@ -395,6 +395,22 @@ function startUiServer() {
       return;
     }
 
+    if (url.pathname === '/param-values') {
+      if (!faustNode) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ values: [] }));
+        return;
+      }
+      const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
+      const values = paramPaths.map((path) => ({
+        path,
+        value: faustNode.getParamValue(path),
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ values }));
+      return;
+    }
+
     if (url.pathname === '/status') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ name: dspName, running: !!faustNode }));
