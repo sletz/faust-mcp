@@ -361,6 +361,25 @@ have the `@shren/faust-ui` package installed (in `ui/`), the server will auto-lo
 it. You can also point `FAUST_UI_ROOT` to a custom bundle directory so the page
 can load `/faust-ui/index.js` and use it instead of the fallback UI.
 
+The UI page (`ui/rt-ui.html`) connects to the running DSP over a lightweight
+HTTP JSON API hosted by the Node worker (`faust_realtime_worker.mjs`) using
+Node's built-in `http` server. This is separate from the MCP transport: MCP
+still runs over SSE/stdio between the Python server and the client, while the UI
+talks directly to the worker via HTTP.
+
+Endpoints used by the UI:
+
+- `GET /status`: current DSP name and running status
+- `GET /json`: full Faust JSON for the current DSP
+- `GET /params`: cached parameter metadata
+- `GET /param-values`: current parameter values (polled)
+- `POST /param`: set a parameter value `{ path, value }`
+- `GET /faust-ui/*`: static assets for `@shren/faust-ui` (optional)
+
+The page polls `/json` and `/status` to detect DSP changes, and polls
+`/param-values` on a short interval (≈1.5s in `rt-ui.html`) to keep the UI
+in sync with parameter updates coming from MCP (`set_param`).
+
 ```bash
 WEBAUDIO_ROOT=external/node-web-audio-api \
 FAUST_UI_PORT=8787 FAUST_UI_ROOT=/path/to/faust-ui/dist/esm \

@@ -32,6 +32,7 @@ ROLLOFF_RATIO = float(os.environ.get("DD_ROLLOFF", "0.85"))
 
 
 def _wrap_test_inputs(faust_code, input_source, input_freq, input_file):
+    """Wrap DSP code with a test input signal when requested."""
     source = (input_source or "none").strip().lower()
     if source == "none":
         return faust_code
@@ -72,6 +73,7 @@ def _wrap_test_inputs(faust_code, input_source, input_freq, input_file):
 
 
 def _create_faust_processor(engine, name, faust_code, sample_rate):
+    """Create a Faust processor compatible with the current DawDreamer API."""
     if dd is None:
         raise RuntimeError("dawDreamer is not installed")
 
@@ -103,6 +105,7 @@ def _create_faust_processor(engine, name, faust_code, sample_rate):
 
 
 def _load_graph(engine, processor):
+    """Load a single-node graph into the DawDreamer render engine."""
     graph = [(processor, [])]
     if hasattr(engine, "load_graph"):
         engine.load_graph(graph)
@@ -114,6 +117,7 @@ def _load_graph(engine, processor):
 
 
 def _ascii_waveform(buffer, width=60):
+    """Generate a compact ASCII waveform preview for a mono buffer."""
     if buffer is None:
         return ""
     if np is not None and isinstance(buffer, np.ndarray):
@@ -146,6 +150,7 @@ def _ascii_waveform(buffer, width=60):
 
 
 def _spectral_features(arr, sample_rate):
+    """Compute spectral summary features for a mono signal buffer."""
     if np is None or arr is None:
         return {
             "spectral_centroid": None,
@@ -231,6 +236,7 @@ def _spectral_features(arr, sample_rate):
 
 
 def _compute_features(buffer, sample_rate):
+    """Compute time-domain and spectral features for a mono buffer."""
     if np is not None:
         arr = buffer if isinstance(buffer, np.ndarray) else np.asarray(buffer, dtype=float)
         if arr.size == 0:
@@ -285,6 +291,7 @@ def _compute_features(buffer, sample_rate):
 
 
 def _load_wav_audio(path):
+    """Load a WAV file into a channel-first numpy array."""
     if np is None:
         raise RuntimeError("numpy is required for input_source=file")
 
@@ -314,6 +321,7 @@ def _load_wav_audio(path):
 
 
 def _metrics_from_buffer(buffer):
+    """Compute max amplitude, RMS, silence flag, and ASCII waveform."""
     if np is not None and isinstance(buffer, np.ndarray):
         max_amp = float(np.max(np.abs(buffer))) if buffer.size else 0.0
         rms = float(np.sqrt(np.mean(np.square(buffer)))) if buffer.size else 0.0
@@ -330,6 +338,7 @@ def _metrics_from_buffer(buffer):
 
 
 def _to_channels(audio):
+    """Normalize audio buffers to a list of per-channel arrays."""
     if audio is None:
         return []
     if np is not None and isinstance(audio, np.ndarray):

@@ -9,6 +9,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 def _extract_result(call_result) -> Dict[str, Any]:
+    """Unwrap a tool call result into a decoded JSON payload."""
     if call_result.structuredContent is not None:
         payload = call_result.structuredContent
         if isinstance(payload, dict) and isinstance(payload.get("result"), str):
@@ -23,6 +24,7 @@ def _extract_result(call_result) -> Dict[str, Any]:
 
 
 def _validate_features(features: Dict[str, Any]) -> None:
+    """Validate the presence and types of feature metrics."""
     for key in [
         "dc_offset",
         "zero_crossing_rate",
@@ -53,6 +55,7 @@ def _validate_features(features: Dict[str, Any]) -> None:
 
 
 def _validate_payload(payload: Dict[str, Any], require_dawdreamer: bool) -> None:
+    """Validate the shape and basic ranges of an analysis response."""
     for key in ["status", "max_amplitude", "rms", "is_silent", "waveform_ascii", "num_outputs", "channels"]:
         if key not in payload:
             raise RuntimeError(f"Missing key: {key}")
@@ -92,6 +95,7 @@ def _validate_payload(payload: Dict[str, Any], require_dawdreamer: bool) -> None
 
 
 async def _call_server(server_path: str, dsp_path: str, tmpdir: str, require_dawdreamer: bool) -> None:
+    """Run a stdio server and validate compile_and_analyze output."""
     env = {"MCP_TRANSPORT": "stdio", "TMPDIR": tmpdir}
     server = StdioServerParameters(command="python3", args=[server_path], cwd=".", env=env)
     async with stdio_client(server) as (read, write):
@@ -105,6 +109,7 @@ async def _call_server(server_path: str, dsp_path: str, tmpdir: str, require_daw
 
 
 async def main() -> None:
+    """Run smoke tests against the available MCP servers."""
     parser = argparse.ArgumentParser(description="Basic smoke test for MCP servers.")
     parser.add_argument("--dsp", default="t1.dsp", help="Path to a Faust DSP file.")
     parser.add_argument("--tmpdir", default="./tmp", help="TMPDIR for server processes.")

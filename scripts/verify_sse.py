@@ -11,14 +11,17 @@ import time
 
 
 def _run(cmd: list[str]) -> None:
+    """Run a command and raise if it fails."""
     subprocess.run(cmd, check=True)
 
 
 def _wait_ready(seconds: float) -> None:
+    """Sleep briefly to allow servers to start."""
     time.sleep(seconds)
 
 
 def _start_server(cmd: list[str], env: dict[str, str] | None = None) -> subprocess.Popen[str]:
+    """Start a subprocess server and return the process handle."""
     return subprocess.Popen(
         cmd,
         env=env,
@@ -29,6 +32,7 @@ def _start_server(cmd: list[str], env: dict[str, str] | None = None) -> subproce
 
 
 def _stop_server(proc: subprocess.Popen[str]) -> None:
+    """Terminate a server process and clean up pipes."""
     if proc.poll() is None:
         proc.terminate()
         try:
@@ -42,6 +46,7 @@ def _stop_server(proc: subprocess.Popen[str]) -> None:
 
 
 def main() -> int:
+    """Run a basic SSE verification loop across available servers."""
     parser = argparse.ArgumentParser(description="Verify SSE server/client combos.")
     parser.add_argument("--dsp", default="t1.dsp", help="Path to a Faust DSP file.")
     parser.add_argument("--tmpdir", default="/tmp/faust-mcp-test", help="TMPDIR for faust_server.py.")

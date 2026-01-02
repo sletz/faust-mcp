@@ -4,54 +4,54 @@ import os
 import tempfile
 import json
 
-# Initialisation du serveur
+# Server initialization
 MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
 mcp = FastMCP("Faust-DSP-Runner", host=MCP_HOST, port=MCP_PORT)
 
-# Chemin vers votre fichier d'architecture C++ (A MODIFIER)
+# Path to the C++ architecture file (edit if needed)
 ARCH_FILE_PATH = os.path.abspath("analysis_arch.cpp")
 
 
 @mcp.tool()
 def compile_and_analyze(faust_code: str) -> str:
     """
-        Compile du code Faust, génère 2 secondes d'audio, et analyse le
-    signal.
-        Retourne l'amplitude max, le RMS et une visualisation ASCII de l'onde.
+    Compile Faust code, render ~2 seconds of audio, and analyze the signal.
+
+    Returns the max amplitude, RMS, and an ASCII waveform preview as JSON.
     """
 
-    # Création d'un dossier temporaire pour la compilation
+    # Create a temporary directory for compilation
     with tempfile.TemporaryDirectory() as temp_dir:
         dsp_file = os.path.join(temp_dir, "process.dsp")
         cpp_file = os.path.join(temp_dir, "process.cpp")
         bin_file = os.path.join(temp_dir, "process_bin")
 
-        # 1. Écriture du fichier DSP
+        # 1. Write the DSP file
         with open(dsp_file, "w") as f:
             f.write(faust_code)
 
         try:
-            # 2. Compilation Faust -> C++ avec l'architecture d'analyse
-            # On suppose que 'faust' est dans le PATH
+            # 2. Compile Faust -> C++ with the analysis architecture
+            # Assumes 'faust' is in PATH
             cmd_faust = ["faust", "-a", ARCH_FILE_PATH, dsp_file, "-o", cpp_file]
             subprocess.check_output(cmd_faust, stderr=subprocess.STDOUT)
 
-            # 3. Compilation C++ -> Binaire
-            # On inclut juste le header courant
+            # 3. Compile C++ -> binary
+            # Only the default include path is used
             cmd_gpp = ["g++", cpp_file, "-o", bin_file, "-O3", "-std=c++11"]  # Optimisation, C++11+
             subprocess.check_output(cmd_gpp, stderr=subprocess.STDOUT)
 
-            # 4. Exécution du binaire pour générer l'analyse
+            # 4. Run the binary to generate analysis output
             result_json = subprocess.check_output([bin_file]).decode("utf-8")
 
-            # On parse pour vérifier que c'est du JSON valide
+            # Parse to validate JSON output
             data = json.loads(result_json)
 
             return json.dumps(data, indent=2)
 
         except subprocess.CalledProcessError as e:
-            # En cas d'erreur de compilation (très utile pour l'IA)
+            # Compilation error (useful for debugging in an LLM loop)
             error_msg = e.output.decode("utf-8") if e.output else str(e)
             return f"Error during compilation:\n{error_msg}"
         except Exception as e:

@@ -57,6 +57,14 @@ let paramsCache = [];
 let uiServer = null;
 let dspName = null;
 
+/**
+ * Wrap DSP code with a generated test input signal when requested.
+ * @param {string} dspCode
+ * @param {string} inputSource
+ * @param {number|undefined|null} inputFreq
+ * @param {string|undefined|null} inputFile
+ * @returns {string}
+ */
 function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
   const source = (inputSource || 'none').trim().toLowerCase();
   if (source === 'none') {
@@ -103,7 +111,8 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
 }
 
 /**
- * Initialize libfaust compiler and WebAudio classes (lazy).
+ * Initialize the Faust compiler and WebAudio classes.
+ * @returns {Promise<object>}
  */
 async function initFaust() {
   // Lazy init for libfaust + compiler.
@@ -133,7 +142,9 @@ async function initFaust() {
 }
 
 /**
- * Convert Faust JSON meta array into a flat object.
+ * Normalize Faust metadata array into a flat key/value map.
+ * @param {Array<object>|undefined|null} meta
+ * @returns {Record<string, string>}
  */
 function metaToObject(meta) {
   // Convert Faust meta array into a flat object.
@@ -150,7 +161,9 @@ function metaToObject(meta) {
 }
 
 /**
- * Walk Faust UI tree and collect controllable parameters.
+ * Walk the Faust UI tree and append parameter descriptors.
+ * @param {Array<object>|undefined|null} items
+ * @param {Array<object>} acc
  */
 function collectParams(items, acc) {
   // Recursively traverse UI items and collect control descriptors.
@@ -188,7 +201,9 @@ function collectParams(items, acc) {
 }
 
 /**
- * Extract parameter descriptors from Faust JSON object.
+ * Extract parameter descriptors from a Faust JSON object.
+ * @param {object|undefined|null} jsonObj
+ * @returns {Array<object>}
  */
 function extractParamsFromJson(jsonObj) {
   const params = [];
@@ -197,7 +212,9 @@ function extractParamsFromJson(jsonObj) {
 }
 
 /**
- * Compile DSP code, start playback, and return JSON + param metadata.
+ * Compile DSP code to validate syntax without starting audio.
+ * @param {{dsp_code: string, name?: string, args?: string}} params
+ * @returns {Promise<object>}
  */
 async function checkSyntax({ dsp_code, name, args }) {
   // Compile DSP to validate syntax without starting audio.
@@ -224,7 +241,9 @@ async function checkSyntax({ dsp_code, name, args }) {
 }
 
 /**
- * Compile DSP code, start playback, and return JSON + param metadata.
+ * Compile DSP code, start playback, and return UI/param metadata.
+ * @param {object} params
+ * @returns {Promise<object>}
  */
 async function compileAndStart({
   dsp_code,
@@ -290,7 +309,7 @@ async function compileAndStart({
 }
 
 /**
- * Ensure a DSP is currently running.
+ * Guard helper to ensure a DSP is running before control operations.
  */
 function ensureRunning() {
   // Guard to ensure a DSP is started before control operations.
@@ -301,6 +320,8 @@ function ensureRunning() {
 
 /**
  * Set a parameter value on the running DSP.
+ * @param {{path: string, value: number}} params
+ * @returns {Promise<object>}
  */
 async function setParam({ path, value }) {
   // Update a parameter on the running DSP.
@@ -312,6 +333,8 @@ async function setParam({ path, value }) {
 
 /**
  * Get the current value of a parameter on the running DSP.
+ * @param {{path: string}} params
+ * @returns {Promise<object>}
  */
 async function getParam({ path }) {
   ensureRunning();
@@ -321,6 +344,7 @@ async function getParam({ path }) {
 
 /**
  * Return cached parameter descriptors and paths.
+ * @returns {Promise<object>}
  */
 async function getParams() {
   // Return cached parameter metadata for the running DSP.
@@ -331,6 +355,7 @@ async function getParams() {
 
 /**
  * Return current values for all known parameters.
+ * @returns {Promise<object>}
  */
 async function getParamValues() {
   ensureRunning();
@@ -343,7 +368,8 @@ async function getParamValues() {
 }
 
 /**
- * Stop playback and reset state.
+ * Stop playback and reset the DSP state.
+ * @returns {Promise<object>}
  */
 async function stop() {
   // Stop audio and reset state.
@@ -364,6 +390,10 @@ async function stop() {
   return { status: 'stopped' };
 }
 
+/**
+ * Resolve the faust-ui bundle root directory.
+ * @returns {string}
+ */
 function resolveUiRoot() {
   if (UI_ROOT) return UI_ROOT;
   try {
@@ -375,6 +405,9 @@ function resolveUiRoot() {
   }
 }
 
+/**
+ * Start the UI HTTP server if enabled.
+ */
 function startUiServer() {
   if (!UI_PORT || uiServer) return;
   const uiHtmlPath = path.join(MCP_ROOT, 'ui', 'rt-ui.html');
