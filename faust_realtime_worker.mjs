@@ -80,12 +80,36 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     throw new Error(`Unsupported input_source: ${inputSource}`);
   }
 
-  // For file input, we'll connect an AudioBufferSourceNode externally
-  // So just pass through the original DSP code (it should have inputs)
+  // For file input, check if it's HTTP URL or local file
   if (source === 'file') {
     if (!inputFile) {
       throw new Error('input_file is required for input_source=file');
     }
+
+    // HTTP/HTTPS URLs: use FAUST soundfile (works with fetch)
+    if (inputFile.startsWith('http://') || inputFile.startsWith('https://')) {
+      const escaped = String(inputFile).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const indented = String(dspCode)
+        .split('\n')
+        .map((line) => (line.trim() ? `  ${line}` : line))
+        .join('\n');
+
+      const wrappedCode = [
+        'import("stdfaust.lib");',
+        'mcp_so = library("soundfiles.lib");',
+        `mcp_sf = soundfile("sound[url:{'${escaped}'}]", 1);`,
+        'mcp_loop_test = mcp_so.loop(mcp_sf, 0);',
+        'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;',
+        'mcp_dsp = environment {',
+        indented,
+        '};',
+        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test);',
+      ].join('\n');
+
+      return { code: wrappedCode, useExternalInput: false };
+    }
+
+    // Local files: use AudioBufferSourceNode (fetch doesn't support file://)
     return { code: dspCode, useExternalInput: true, inputFile };
   }
 
