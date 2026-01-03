@@ -23,6 +23,7 @@ async def main(
     input_file: str | None,
     param_path: str | None,
     param_value: float | None,
+    param_values: list[str] | None,
 ) -> None:
     """Run the stdio MCP client and call the requested tool.
 
@@ -71,6 +72,16 @@ async def main(
                 args = {"path": param_path}
             elif tool == "get_param_values":
                 args = {}
+            elif tool == "set_param_values":
+                if not param_values:
+                    raise ValueError("--param-values is required for set_param_values")
+                values = []
+                for entry in param_values:
+                    if "=" not in entry:
+                        raise ValueError("param entry must be PATH=VALUE")
+                    path, value = entry.split("=", 1)
+                    values.append({"path": path, "value": float(value)})
+                args = {"values": values}
             elif tool == "set_param":
                 if not param_path or param_value is None:
                     raise ValueError("--param-path and --param-value are required for set_param")
@@ -95,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, set_param_values, set_param, stop).",
     )
     parser.add_argument(
         "--name",
@@ -139,6 +150,11 @@ if __name__ == "__main__":
         type=float,
         help="Parameter value for set_param.",
     )
+    parser.add_argument(
+        "--param-values",
+        action="append",
+        help="Repeated PATH=VALUE pairs for set_param_values.",
+    )
     args = parser.parse_args()
     anyio.run(
         main,
@@ -153,4 +169,5 @@ if __name__ == "__main__":
         args.input_file,
         args.param_path,
         args.param_value,
+        args.param_values,
     )

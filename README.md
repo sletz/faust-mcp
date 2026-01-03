@@ -52,7 +52,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `get_param`, `get_param_values`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `stop`.
 - Offline tools: `compile_and_analyze`.
 - DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
@@ -398,6 +398,7 @@ Then open:
 - `get_params()`
 - `get_param(path)`
 - `get_param_values()`
+- `set_param_values(values)`
 - `set_param(path, value)`
 - `stop()`
 
@@ -470,7 +471,7 @@ Example flow for Claude Code or another MCP-capable LLM:
 2. The LLM connects over SSE or stdio and lists available tools.
 3. The LLM sends DSP code to `compile_and_analyze` (offline servers) or `compile_and_start` (real-time).
 4. The server returns analysis metrics (offline) or parameter metadata (real-time).
-5. The LLM uses `set_param` to adjust controls, and `get_param_values` to read back state.
+5. The LLM uses `set_param/set_param_values` to adjust controls, and `get_param/get_param_values` to read back state.
 
 Minimal real-time loop (conceptual):
 
@@ -478,6 +479,14 @@ Minimal real-time loop (conceptual):
 compile_and_start(faust_code="...", name="osc1")
 get_param_values()
 set_param(path="/freq", value=440)
+set_param_values(values=[{"path": "/gain", "value": 0.2}, {"path": "/cutoff", "value": 1200}])
+```
+
+To list available tools from a local SSE server, use:
+
+```bash
+python3 scripts/list_tools.py
+python3 scripts/list_tools.py --details
 ```
 
 ## Typical use cases

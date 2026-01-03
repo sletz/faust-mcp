@@ -206,6 +206,14 @@ def get_param_values() -> str:
 
 
 @mcp.tool()
+def set_param_values(values: list[dict]) -> str:
+    """Set multiple parameter values on the running DSP."""
+
+    result = worker.request("set_param_values", {"values": values})
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 def stop() -> str:
     """Stop the running DSP and close the audio context."""
 

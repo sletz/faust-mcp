@@ -368,6 +368,33 @@ async function getParamValues() {
 }
 
 /**
+ * Set multiple parameter values on the running DSP.
+ * @param {{values: Array<{path: string, value: number}>}} params
+ * @returns {Promise<object>}
+ */
+async function setParamValues({ values }) {
+  ensureRunning();
+  if (!Array.isArray(values)) {
+    throw new Error('values must be an array');
+  }
+  const updated = [];
+  for (const entry of values) {
+    if (!entry || typeof entry.path !== 'string') {
+      throw new Error('Each entry must include a path string');
+    }
+    if (typeof entry.value !== 'number') {
+      throw new Error('Each entry must include a numeric value');
+    }
+    faustNode.setParamValue(entry.path, entry.value);
+    updated.push({
+      path: entry.path,
+      value: faustNode.getParamValue(entry.path),
+    });
+  }
+  return { status: 'ok', values: updated };
+}
+
+/**
  * Stop playback and reset the DSP state.
  * @returns {Promise<object>}
  */
@@ -505,6 +532,7 @@ const handlers = {
   get_param: getParam,
   get_params: getParams,
   get_param_values: getParamValues,
+  set_param_values: setParamValues,
   stop,
 };
 
