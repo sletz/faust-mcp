@@ -5,6 +5,7 @@ and prints the result.
 """
 
 import argparse
+import os
 
 import anyio
 from mcp.client.session import ClientSession
@@ -43,6 +44,10 @@ async def main(
     env = {"MCP_TRANSPORT": "stdio"}
     if tmpdir:
         env["TMPDIR"] = tmpdir
+    for key in ("FAUST_UI_PORT", "FAUST_UI_ROOT", "WEBAUDIO_ROOT"):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
     server = StdioServerParameters(command="python3", args=[server_path], cwd=".", env=env)
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:

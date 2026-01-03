@@ -19,7 +19,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-set-param rt-stop
+.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-set-param rt-stop stop-rt
 
 help:
 	@printf "Targets:\n"
@@ -35,6 +35,8 @@ help:
 	@printf "  run-rt-ui    Start real-time MCP server with UI bridge\n"
 	@printf "  run-rt-stdio Start real-time MCP server over stdio\n"
 	@printf "  run-rt-stdio-ui Start real-time MCP server over stdio with UI bridge\n"
+	@printf "  run-rt-stdio-session Start a persistent stdio session (multi-DSP)\n"
+	@printf "  stop-rt      Stop the real-time server (SSE or stdio)\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
@@ -132,6 +134,10 @@ run-rt-stdio-ui:
 	MCP_TRANSPORT=stdio \
 	$(PYTHON) faust_realtime_server.py
 
+run-rt-stdio-session:
+	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
+	$(PYTHON) stdio_rt_session.py
+
 client-rt:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
 		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
@@ -158,6 +164,16 @@ rt-set-param:
 
 rt-stop:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop
+
+stop-rt:
+	@if [ "$(MCP_TRANSPORT)" = "stdio" ]; then \
+		pkill -f "faust_realtime_server.py" || true; \
+		pkill -f "faust_realtime_worker.mjs" || true; \
+	else \
+		$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop >/dev/null 2>&1 || true; \
+		pkill -f "faust_realtime_server.py" || true; \
+		pkill -f "faust_realtime_worker.mjs" || true; \
+	fi
 
 smoke-test:
 	@mkdir -p $(TMPDIR)

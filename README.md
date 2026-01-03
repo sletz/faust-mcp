@@ -615,6 +615,7 @@ make run-rt
 make run-rt-ui
 make run-rt-stdio
 make run-rt-stdio-ui
+make run-rt-stdio-session
 make rt-compile DSP=t1.dsp RT_NAME=osc1
 make rt-get-params
 make rt-get-param RT_PARAM_PATH=/freq
@@ -645,6 +646,29 @@ Edit `~/.config/Claude/claude_desktop_config.json` and add:
     "faust": {
       "type": "sse",
       "url": "http://127.0.0.1:8000/sse"
+    }
+  }
+}
+```
+
+### Claude Desktop (stdio, real-time)
+
+If you use stdio with Claude Desktop, set a working directory (if supported)
+or pass `FAUST_WORKER_PATH` so the server can locate the Node worker:
+
+```json
+{
+  "mcpServers": {
+    "faust": {
+      "command": "python3",
+      "args": ["/path/to/faust-mcp/faust_realtime_server.py"],
+      "cwd": "/path/to/faust-mcp",
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "WEBAUDIO_ROOT": "/path/to/faust-mcp/external/node-web-audio-api",
+        "FAUST_UI_PORT": "8787",
+        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_realtime_worker.mjs"
+      }
     }
   }
 }

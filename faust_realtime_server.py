@@ -38,7 +38,9 @@ WEBAUDIO_ROOT = os.environ.get(
     ),
 )
 
-WORKER_PATH = os.path.abspath("faust_realtime_worker.mjs")
+WORKER_PATH = os.environ.get(
+    "FAUST_WORKER_PATH", os.path.abspath("faust_realtime_worker.mjs")
+)
 
 mcp = FastMCP(
     "Faust-RT-Runner",
@@ -224,4 +226,5 @@ def stop() -> str:
 if __name__ == "__main__":
     transport = os.environ.get("MCP_TRANSPORT", "sse")
     mount_path = os.environ.get("MCP_MOUNT_PATH")
+    print(f"Faust realtime MCP server starting (transport={transport})")
     mcp.run(transport=transport, mount_path=mount_path)

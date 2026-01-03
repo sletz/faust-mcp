@@ -522,7 +522,19 @@ function startUiServer() {
     res.end('Not found');
   });
 
-  uiServer.listen(UI_PORT);
+  uiServer.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`UI port ${UI_PORT} already in use; UI server disabled.`);
+      uiServer = null;
+      return;
+    }
+    console.error('UI server error:', err);
+  });
+
+  uiServer.listen(UI_PORT, () => {
+    const uiMode = resolvedUiRoot ? 'faust-ui' : 'fallback';
+    console.log(`UI server listening on http://127.0.0.1:${UI_PORT}/ (${uiMode})`);
+  });
 }
 
 const handlers = {
@@ -536,6 +548,7 @@ const handlers = {
   stop,
 };
 
+console.log('Faust realtime worker starting');
 startUiServer();
 
 // Minimal JSON-over-stdin protocol for the Python MCP server.
