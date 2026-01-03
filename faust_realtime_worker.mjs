@@ -86,16 +86,33 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       throw new Error('input_file is required for input_source=file');
     }
 
+    const indented = String(dspCode)
+      .split('\n')
+      .map((line) => (line.trim() ? `  ${line}` : line))
+      .join('\n');
+
+    // Metering definitions (shared for both file input types)
+    const meteringDefs = [
+      '// Output metering (RMS + Peak per channel)',
+      'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
+      'mcp_rms_L = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("L_RMS", -60, 0));',
+      'mcp_peak_L = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("L_Peak", -60, 0));',
+      'mcp_rms_R = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("R_RMS", -60, 0));',
+      'mcp_peak_R = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("R_Peak", -60, 0));',
+      'mcp_meter_L = mcp_rms_L : mcp_peak_L;',
+      'mcp_meter_R = mcp_rms_R : mcp_peak_R;',
+      'mcp_stereo_meter = mcp_meter_L, mcp_meter_R;',
+      '',
+    ];
+
     // HTTP/HTTPS URLs: use FAUST soundfile (works with fetch)
     if (inputFile.startsWith('http://') || inputFile.startsWith('https://')) {
       const escaped = String(inputFile).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      const indented = String(dspCode)
-        .split('\n')
-        .map((line) => (line.trim() ? `  ${line}` : line))
-        .join('\n');
 
       const wrappedCode = [
         'import("stdfaust.lib");',
+        '',
+        ...meteringDefs,
         'mcp_so = library("soundfiles.lib");',
         `mcp_sf = soundfile("sound[url:{'${escaped}'}]", 1);`,
         'mcp_loop_test = mcp_so.loop(mcp_sf, 0);',
@@ -103,14 +120,26 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
         'mcp_dsp = environment {',
         indented,
         '};',
-        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test);',
+        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test) : mcp_stereo_meter;',
       ].join('\n');
 
       return { code: wrappedCode, useExternalInput: false };
     }
 
     // Local files: use AudioBufferSourceNode (fetch doesn't support file://)
-    return { code: dspCode, useExternalInput: true, inputFile };
+    // Wrap DSP with metering (file source connects externally to Faust node input)
+    const wrappedCode = [
+      'import("stdfaust.lib");',
+      '',
+      ...meteringDefs,
+      '// User DSP',
+      'mcp_dsp = environment {',
+      indented,
+      '};',
+      'process = mcp_dsp.process : mcp_stereo_meter;',
+    ].join('\n');
+
+    return { code: wrappedCode, useExternalInput: true, inputFile };
   }
 
   // For sine/noise, wrap the DSP with test signal generator
@@ -127,13 +156,30 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     .map((line) => (line.trim() ? `  ${line}` : line))
     .join('\n');
 
+  // Metering definitions
+  const meteringDefs = [
+    '// Output metering (RMS + Peak per channel)',
+    'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
+    'mcp_rms_L = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("L_RMS", -60, 0));',
+    'mcp_peak_L = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("L_Peak", -60, 0));',
+    'mcp_rms_R = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("R_RMS", -60, 0));',
+    'mcp_peak_R = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("R_Peak", -60, 0));',
+    'mcp_meter_L = mcp_rms_L : mcp_peak_L;',
+    'mcp_meter_R = mcp_rms_R : mcp_peak_R;',
+    'mcp_stereo_meter = mcp_meter_L, mcp_meter_R;',
+    '',
+  ];
+
   const wrappedCode = [
     'import("stdfaust.lib");',
+    '',
+    ...meteringDefs,
+    '// User DSP',
     'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;',
     'mcp_dsp = environment {',
     indented,
     '};',
-    `process = mcp_addTestInputs(mcp_dsp.process, ${signal});`,
+    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_stereo_meter;`,
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
