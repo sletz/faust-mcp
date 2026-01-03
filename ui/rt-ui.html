@@ -118,6 +118,10 @@
         if (!entry) return;
         const path = entry.path;
         const value = entry.value;
+        // Debug: log bargraph values
+        if (path.includes('RMS') || path.includes('Peak')) {
+          console.log('Bargraph update:', path, '=', value);
+        }
         if (faustUiInstance) {
           faustUiInstance.paramChangeByDSP(path, value);
         }
@@ -189,6 +193,8 @@
 
     async function main() {
       let lastJson = await renderOnce();
+
+      // Slow poll: check for DSP changes (500ms)
       setInterval(async () => {
         try {
           const json = await fetchJson('/json');
@@ -208,9 +214,13 @@
           const status = document.getElementById('status');
           status.textContent = String(err);
         }
+      }, 500);
+
+      // Fast poll: meter updates (100ms)
+      setInterval(async () => {
         const values = await fetchParamValues();
         applyParamValues(values?.values);
-      }, 1500);
+      }, 100);
     }
 
     main();

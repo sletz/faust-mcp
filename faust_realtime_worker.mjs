@@ -59,6 +59,7 @@ let audioContext = null;
 let faustNode = null;
 let faustJson = null;
 let paramsCache = [];
+let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParamHandler
 let uiServer = null;
 let dspName = null;
 let fileSourceNode = null;  // For file input playback
@@ -91,17 +92,14 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       .map((line) => (line.trim() ? `  ${line}` : line))
       .join('\n');
 
-    // Metering definitions (shared for both file input types)
+    // Adaptive metering for N outputs using outputs(FX)
     const meteringDefs = [
-      '// Output metering (RMS + Peak per channel)',
+      '// Output metering (Peak + RMS per channel, adapts to outputs(FX))',
       'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-      'mcp_rms_L = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("L_RMS", -60, 0));',
-      'mcp_peak_L = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("L_Peak", -60, 0));',
-      'mcp_rms_R = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("R_RMS", -60, 0));',
-      'mcp_peak_R = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("R_Peak", -60, 0));',
-      'mcp_meter_L = mcp_rms_L : mcp_peak_L;',
-      'mcp_meter_R = mcp_rms_R : mcp_peak_R;',
-      'mcp_stereo_meter = mcp_meter_L, mcp_meter_R;',
+      'mcp_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
+      'mcp_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
+      'mcp_channel_meter(i) = mcp_peak(i) : mcp_rms(i);',
+      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_channel_meter(i));',
       '',
     ];
 
@@ -120,7 +118,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
         'mcp_dsp = environment {',
         indented,
         '};',
-        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test) : mcp_stereo_meter;',
+        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test) : mcp_output_meters(mcp_dsp.process);',
       ].join('\n');
 
       return { code: wrappedCode, useExternalInput: false };
@@ -136,7 +134,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       'mcp_dsp = environment {',
       indented,
       '};',
-      'process = mcp_dsp.process : mcp_stereo_meter;',
+      'process = mcp_dsp.process : mcp_output_meters(mcp_dsp.process);',
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: true, inputFile };
@@ -156,17 +154,14 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     .map((line) => (line.trim() ? `  ${line}` : line))
     .join('\n');
 
-  // Metering definitions
+  // Adaptive metering for N outputs using outputs(FX)
   const meteringDefs = [
-    '// Output metering (RMS + Peak per channel)',
+    '// Output metering (Peak + RMS per channel, adapts to outputs(FX))',
     'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-    'mcp_rms_L = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("L_RMS", -60, 0));',
-    'mcp_peak_L = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("L_Peak", -60, 0));',
-    'mcp_rms_R = _ <: attach(_, an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("R_RMS", -60, 0));',
-    'mcp_peak_R = _ <: attach(_, an.peak_envelope(0.1) : mcp_lin2db : hbargraph("R_Peak", -60, 0));',
-    'mcp_meter_L = mcp_rms_L : mcp_peak_L;',
-    'mcp_meter_R = mcp_rms_R : mcp_peak_R;',
-    'mcp_stereo_meter = mcp_meter_L, mcp_meter_R;',
+    'mcp_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
+    'mcp_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
+    'mcp_channel_meter(i) = mcp_peak(i) : mcp_rms(i);',
+    'mcp_output_meters(FX) = par(i, outputs(FX), mcp_channel_meter(i));',
     '',
   ];
 
@@ -179,7 +174,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     'mcp_dsp = environment {',
     indented,
     '};',
-    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_stereo_meter;`,
+    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_output_meters(mcp_dsp.process);`,
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
@@ -366,6 +361,15 @@ async function compileAndStart({
     throw new Error('Failed to create Faust node');
   }
 
+  // Register handler for output parameters (bargraphs)
+  // DSP pushes values here instead of polling
+  outputParamsCache = {};
+  if (typeof faustNode.setOutputParamHandler === 'function') {
+    faustNode.setOutputParamHandler((path, value) => {
+      outputParamsCache[path] = value;
+    });
+  }
+
   faustNode.connect(audioContext.destination);
 
   // Handle file input: load audio file and connect to FAUST input
@@ -464,7 +468,7 @@ async function getParams() {
 }
 
 /**
- * Return current values for all known parameters.
+ * Return current values for all known parameters (inputs + outputs).
  * @returns {Promise<object>}
  */
 async function getParamValues() {
@@ -474,6 +478,15 @@ async function getParamValues() {
     path,
     value: faustNode.getParamValue(path),
   }));
+
+  // Add output parameter values (bargraphs) from the handler cache
+  for (const [path, value] of Object.entries(outputParamsCache)) {
+    // Only add if not already in values (avoid duplicates)
+    if (!values.some((v) => v.path === path)) {
+      values.push({ path, value });
+    }
+  }
+
   return { status: 'ok', values };
 }
 
@@ -530,6 +543,7 @@ async function stop() {
   audioContext = null;
   faustJson = null;
   paramsCache = [];
+  outputParamsCache = {};
   return { status: 'stopped' };
 }
 
@@ -582,6 +596,12 @@ function startUiServer() {
         path,
         value: faustNode.getParamValue(path),
       }));
+      // Add output parameter values (bargraphs) from the handler cache
+      for (const [path, value] of Object.entries(outputParamsCache)) {
+        if (!values.some((v) => v.path === path)) {
+          values.push({ path, value });
+        }
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ values }));
       return;
