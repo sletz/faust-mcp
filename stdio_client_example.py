@@ -1,6 +1,6 @@
 """Example stdio client for calling the Faust MCP server.
 
-Starts the server as a subprocess over stdio, calls compile_and_analyze,
+Starts the server as a subprocess over stdio, calls a selected tool,
 and prints the result.
 """
 

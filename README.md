@@ -328,6 +328,7 @@ Environment variables:
 - `WEBAUDIO_ROOT`: node-web-audio-api path (default `external/node-web-audio-api`)
 - `FAUST_UI_PORT`: enable UI server on this port (optional)
 - `FAUST_UI_ROOT`: path to a built `faust-ui` bundle (optional, overrides auto-detect)
+- `FAUST_WORKER_PATH`: absolute path to `faust_realtime_worker.mjs` (optional)
 
 Submodule setup (one-time):
 
@@ -429,7 +430,7 @@ python3 -m http.server 9000
 The real-time server runs a Node worker process and talks to it over stdin/stdout:
 
 - `faust_realtime_server.py` starts the worker with `node faust_realtime_worker.mjs`
-  and passes `WEBAUDIO_ROOT` in the environment.
+  (override with `FAUST_WORKER_PATH`) and passes `WEBAUDIO_ROOT` in the environment.
 - The worker reads JSON lines like:
   `{ "id": 1, "method": "compile_and_start", "params": {...} }`
 - It responds with:
@@ -587,6 +588,12 @@ python3 stdio_client_example.py --server faust_realtime_server.py \
   --input-source noise
 ```
 
+For an SSE-like loop in stdio (compile multiple DSPs in one session), use:
+
+```bash
+FAUST_UI_PORT=8787 python3 stdio_rt_session.py --dsp t1.dsp --dsp t2.dsp
+```
+
 ## Local verification checklist
 
 These commands exercise the common server/client combinations on a local machine:
@@ -621,6 +628,7 @@ make rt-get-params
 make rt-get-param RT_PARAM_PATH=/freq
 make rt-set-param RT_PARAM_PATH=/freq RT_PARAM_VALUE=440
 make rt-stop
+make stop-rt
 ```
 
 ## Transport matrix
