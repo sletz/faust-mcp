@@ -92,14 +92,20 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       .map((line) => (line.trim() ? `  ${line}` : line))
       .join('\n');
 
-    // Adaptive metering for N outputs using outputs(FX)
+    // Adaptive metering for N inputs/outputs
     const meteringDefs = [
-      '// Output metering (Peak + RMS per channel, adapts to outputs(FX))',
+      '// Metering (Peak + RMS per channel)',
       'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-      'mcp_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
-      'mcp_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
-      'mcp_channel_meter(i) = mcp_peak(i) : mcp_rms(i);',
-      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_channel_meter(i));',
+      '// Input meters',
+      'mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
+      'mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
+      'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
+      'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
+      '// Output meters',
+      'mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
+      'mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
+      'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
+      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i));',
       '',
     ];
 
@@ -125,7 +131,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     }
 
     // Local files: use AudioBufferSourceNode (fetch doesn't support file://)
-    // Wrap DSP with metering (file source connects externally to Faust node input)
+    // Wrap DSP with input + output metering (file source connects externally to Faust node input)
     const wrappedCode = [
       'import("stdfaust.lib");',
       '',
@@ -134,7 +140,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       'mcp_dsp = environment {',
       indented,
       '};',
-      'process = mcp_dsp.process : mcp_output_meters(mcp_dsp.process);',
+      'process = mcp_input_meters(mcp_dsp.process) : mcp_dsp.process : mcp_output_meters(mcp_dsp.process);',
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: true, inputFile };
@@ -154,14 +160,20 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     .map((line) => (line.trim() ? `  ${line}` : line))
     .join('\n');
 
-  // Adaptive metering for N outputs using outputs(FX)
+  // Adaptive metering for N inputs/outputs
   const meteringDefs = [
-    '// Output metering (Peak + RMS per channel, adapts to outputs(FX))',
+    '// Metering (Peak + RMS per channel)',
     'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-    'mcp_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
-    'mcp_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
-    'mcp_channel_meter(i) = mcp_peak(i) : mcp_rms(i);',
-    'mcp_output_meters(FX) = par(i, outputs(FX), mcp_channel_meter(i));',
+    '// Input meters',
+    'mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
+    'mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
+    'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
+    'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
+    '// Output meters',
+    'mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
+    'mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
+    'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
+    'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i));',
     '',
   ];
 
@@ -170,11 +182,11 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     '',
     ...meteringDefs,
     '// User DSP',
-    'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;',
+    'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig);',
     'mcp_dsp = environment {',
     indented,
     '};',
-    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_output_meters(mcp_dsp.process);`,
+    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_input_meters(mcp_dsp.process) : mcp_dsp.process : mcp_output_meters(mcp_dsp.process);`,
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
