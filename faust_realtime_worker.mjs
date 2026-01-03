@@ -15,6 +15,7 @@
 import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { Blob } from 'node:buffer';
 import path from 'node:path';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -23,6 +24,10 @@ import fs from 'node:fs';
 const WEB_AUDIO_ROOT = process.env.WEBAUDIO_ROOT || 'external/node-web-audio-api';
 const UI_PORT = Number(process.env.FAUST_UI_PORT || 0);
 const UI_ROOT = process.env.FAUST_UI_ROOT || '';
+
+if (!globalThis.Blob) {
+  globalThis.Blob = Blob;
+}
 const MCP_ROOT = process.env.FAUST_MCP_ROOT || process.cwd();
 
 // Ensure native bindings are resolved relative to the node-web-audio-api checkout.
