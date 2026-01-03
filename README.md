@@ -387,6 +387,16 @@ MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
 python3 faust_realtime_server.py
 ```
 
+If you want Claude Code over stdio and the UI at the same time, run the server
+in stdio mode with `FAUST_UI_PORT` set:
+
+```bash
+WEBAUDIO_ROOT=external/node-web-audio-api \
+FAUST_UI_PORT=8787 FAUST_UI_ROOT=/path/to/faust-ui/dist/esm \
+MCP_TRANSPORT=stdio \
+python3 faust_realtime_server.py
+```
+
 Then open:
 
 - `http://127.0.0.1:8787/`

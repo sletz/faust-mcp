@@ -19,7 +19,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-set-param rt-stop
+.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-set-param rt-stop
 
 help:
 	@printf "Targets:\n"
@@ -33,6 +33,8 @@ help:
 	@printf "  run-daw      Start the DawDreamer MCP server over SSE\n"
 	@printf "  run-rt       Start the real-time MCP server over SSE\n"
 	@printf "  run-rt-ui    Start real-time MCP server with UI bridge\n"
+	@printf "  run-rt-stdio Start real-time MCP server over stdio\n"
+	@printf "  run-rt-stdio-ui Start real-time MCP server over stdio with UI bridge\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
@@ -119,6 +121,15 @@ run-rt:
 run-rt-ui:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
 	MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
+	$(PYTHON) faust_realtime_server.py
+
+run-rt-stdio:
+	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) MCP_TRANSPORT=stdio \
+	$(PYTHON) faust_realtime_server.py
+
+run-rt-stdio-ui:
+	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
+	MCP_TRANSPORT=stdio \
 	$(PYTHON) faust_realtime_server.py
 
 client-rt:
