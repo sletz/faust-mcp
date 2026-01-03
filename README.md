@@ -613,6 +613,8 @@ python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
 ```bash
 make run-rt
 make run-rt-ui
+make run-rt-stdio
+make run-rt-stdio-ui
 make rt-compile DSP=t1.dsp RT_NAME=osc1
 make rt-get-params
 make rt-get-param RT_PARAM_PATH=/freq
