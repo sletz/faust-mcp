@@ -61,6 +61,7 @@ let faustJson = null;
 let paramsCache = [];
 let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParamHandler
 let meterUnitsByPath = {};
+let meterProbesByPath = {};
 let uiServer = null;
 let dspName = null;
 let fileSourceNode = null;  // For file input playback
@@ -243,7 +244,7 @@ function normalizeMeterPath(path) {
 
 /**
  * Compute output metering (RMS/Peak) from cached bargraph values.
- * @returns {{ mix: { rms: number, peak: number, hasNaN: boolean }, channels: Array<{ rms: number|null, peak: number|null }> }}
+ * @returns {{ mix: { rms: number, peak: number, hasNaN: boolean }, channels: Array<{ rms: number|null, peak: number|null }>, probes: Array<{ id: number, value: number }> }}
  */
 function computeAudioMetrics() {
   const peakRegex = /Output Meters\/Peak ch(\d+)/;
@@ -251,6 +252,7 @@ function computeAudioMetrics() {
   const mixPeakRegex = /Output Meters\/Mix Peak/;
   const mixRmsRegex = /Output Meters\/Mix RMS/;
   const channels = [];
+  const probes = {};
   let hasNaN = false;
   let mixRms = null;
   let mixPeak = null;
@@ -259,6 +261,10 @@ function computeAudioMetrics() {
     const normalizedPath = normalizeMeterPath(path);
     const unit = meterUnitsByPath[path] ?? null;
     const mappedValue = unit === 'dB' ? dbToLinear(value) : value;
+    const probeId = meterProbesByPath[path];
+    if (Number.isFinite(probeId)) {
+      probes[probeId] = mappedValue;
+    }
     if (mixPeakRegex.test(normalizedPath)) {
       const peak = mappedValue;
       mixPeak = peak;
@@ -295,6 +301,10 @@ function computeAudioMetrics() {
 
   const resolvedMixRms = mixRms ?? 0;
   const resolvedMixPeak = mixPeak ?? 0;
+  const probeEntries = Object.entries(probes)
+    .map(([id, value]) => ({ id: Number(id), value }))
+    .sort((a, b) => a.id - b.id);
+
   return {
     mix: {
       rms: resolvedMixRms,
@@ -302,6 +312,7 @@ function computeAudioMetrics() {
       hasNaN,
     },
     channels: definedChannels,
+    probes: probeEntries,
   };
 }
 
@@ -415,6 +426,29 @@ function collectBargraphUnits(items, acc) {
   }
 }
 
+function collectBargraphProbes(items, acc) {
+  // Recursively traverse UI items and collect bargraph probes by address.
+  for (const item of items || []) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.items) {
+      collectBargraphProbes(item.items, acc);
+      continue;
+    }
+
+    const type = item.type;
+    const isBargraph = ['hbargraph', 'vbargraph'].includes(type);
+    if (!isBargraph) continue;
+
+    const meta = metaToObject(item.meta);
+    if (typeof item.address === 'string' && meta.probe !== undefined) {
+      const probeId = Number.parseInt(meta.probe, 10);
+      if (Number.isFinite(probeId)) {
+        acc[item.address] = probeId;
+      }
+    }
+  }
+}
+
 /**
  * Extract parameter descriptors from a Faust JSON object.
  * @param {object|undefined|null} jsonObj
@@ -435,6 +469,17 @@ function extractBargraphUnits(jsonObj) {
   const units = {};
   collectBargraphUnits(jsonObj?.ui || [], units);
   return units;
+}
+
+/**
+ * Extract bargraph probes (by address) from a Faust JSON object.
+ * @param {object|undefined|null} jsonObj
+ * @returns {Object<string, number>}
+ */
+function extractBargraphProbes(jsonObj) {
+  const probes = {};
+  collectBargraphProbes(jsonObj?.ui || [], probes);
+  return probes;
 }
 
 /**
@@ -571,6 +616,7 @@ async function compileAndStart({
   dspName = faustJson?.name || name || null;
   paramsCache = extractParamsFromJson(faustJson);
   meterUnitsByPath = extractBargraphUnits(faustJson);
+  meterProbesByPath = extractBargraphProbes(faustJson);
 
   const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
 
@@ -718,6 +764,7 @@ async function stop() {
   paramsCache = [];
   outputParamsCache = {};
   meterUnitsByPath = {};
+  meterProbesByPath = {};
   return { status: 'stopped' };
 }
 

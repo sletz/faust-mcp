@@ -13,7 +13,7 @@ This repository provides three MCP servers that compile, render, or play Faust D
 - `faust_realtime_server.py`: Real-time MCP server using node-web-audio-api + Faust WASM.
 - `faust_realtime_worker.mjs`: Node worker that hosts the real-time DSP graph.
 - `analysis_arch.cpp`: Faust C++ architecture used to generate analysis data.
-- `t1.dsp`, `t2.dsp`, `noise.dsp`: Example Faust DSP programs.
+- `t1.dsp`, `t2.dsp`, `noise.dsp`, `probe.dsp`: Example Faust DSP programs.
 - `sse_client_example.py`: SSE client example.
 - `stdio_client_example.py`: stdio client example.
 - `smoke_test.py`: Basic stdio smoke test for both offline servers.
@@ -181,8 +181,8 @@ Render details:
 
 ### What it does
 
-This variant uses [DawDreamer](https://github.com/DBraun/DawDreamer) to compile 
-and render Faust DSP directly in Python, so you do not need to generate and compile C++ code. 
+This variant uses [DawDreamer](https://github.com/DBraun/DawDreamer) to compile
+and render Faust DSP directly in Python, so you do not need to generate and compile C++ code.
 It renders offline audio and returns the same analysis metrics plus a `dawdreamer` info block and
 DawDreamer-only features.
 
@@ -312,9 +312,9 @@ This variant compiles Faust DSP code to WebAudio on the fly and plays it in real
 using the `node-web-audio-api` runtime. It returns parameter metadata extracted from
 the Faust JSON so an LLM can control the running DSP (no offline analysis metrics).
 
-[node-web-audio-api](https://github.com/ircam-ismm/node-web-audio-api) is an open-source Node.js implementation 
+[node-web-audio-api](https://github.com/ircam-ismm/node-web-audio-api) is an open-source Node.js implementation
 of the Web Audio API that provides AudioContext/AudioWorklet support outside the browser, backed by
-native audio I/O. 
+native audio I/O.
 
 ### Requirements
 
@@ -427,11 +427,16 @@ value to linear amplitude before returning it. The conversion is
 silence detection or `peak > 1.0` for clipping heuristics. Bargraphs without the
 `[unit:dB]` tag are returned as-is.
 
+If a bargraph includes `[probe:N]` metadata (with `N` as an integer), its value
+is added to the `probes` array in `get_audio_metrics()` as `{ id, value }`. This
+lets MCP clients inject extra metering probes into the DSP graph and retrieve
+them alongside the standard mix/channel meters.
+
 ```json
 {
   "mix": { "rms": 0.23, "peak": 0.45, "hasNaN": false },
   "channels": [
-    { "rms": 0.20, "peak": 0.42 },
+    { "rms": 0.2, "peak": 0.42 },
     { "rms": 0.25, "peak": 0.48 }
   ]
 }
@@ -508,6 +513,37 @@ import("stdfaust.lib");
 gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
 
 process = no.noise * gain;
+```
+
+`probe.dsp`:
+
+```faust
+import("stdfaust.lib");
+
+probe_rms_db(id, hide, x) = x <: attach(x, an.rms_envelope_rect(0.1)
+  : max(0.00001) : ba.linear2db
+  : hbargraph("Probe RMS%2id[probe:%id][unit:dB][hidden:%hide]", -60, 0));
+
+probe_rms_lin(id, hide, x) = x <: attach(x, an.rms_envelope_rect(0.1)
+  : hbargraph("Probe RMS%2id[probe:%id][hidden:%hide]", 0, 1));
+  
+probe_peak_db(id, hide, x) = x <: attach(x, an.peak_envelope(0.1)
+  : max(0.00001) : ba.linear2db
+  : hbargraph("Probe Peak%2id[probe:%id][unit:dB][hidden:%hide]", -60, 0));
+
+probe_peak_lin(id, hide, x) = x <: attach(x, an.peak_envelope(0.1)
+  : hbargraph("Probe Peak%2id[probe:%id][hidden:%hide]", 0, 1));
+
+freq = hslider("freq", 440, 20, 2000, 1);
+gain = hslider("gain", 0.5, 0, 1, 0.01);
+gate = button("gate");
+
+// Pipeline with probes at each stage
+osc = os.sawtooth(freq) : probe_rms_db(0, 0);
+shaped = osc * en.adsr(0.01, 0.1, 0.7, 0.3, gate) : probe_rms_db(1, 0);
+output = shaped * gain : probe_rms_db(2, 0);
+
+process = output <: _,_;
 ```
 
 ## Clients
@@ -672,14 +708,14 @@ make stop-rt
 
 ## Transport matrix
 
-| Server | Transport | Client | Works |
-| --- | --- | --- | --- |
-| `faust_server.py` | SSE | `sse_client_example.py` / `make client-sse` | Yes |
-| `faust_server.py` | stdio | `stdio_client_example.py` / `make client-stdio` | Yes |
-| `faust_server_daw.py` | SSE | `sse_client_example.py` / `make client-daw` | Yes |
-| `faust_server_daw.py` | stdio | `stdio_client_example.py` | Yes |
-| `faust_realtime_server.py` | SSE | `sse_client_example.py` | Yes |
-| `faust_realtime_server.py` | stdio | `stdio_client_example.py` | Yes |
+| Server                     | Transport | Client                                          | Works |
+| -------------------------- | --------- | ----------------------------------------------- | ----- |
+| `faust_server.py`          | SSE       | `sse_client_example.py` / `make client-sse`     | Yes   |
+| `faust_server.py`          | stdio     | `stdio_client_example.py` / `make client-stdio` | Yes   |
+| `faust_server_daw.py`      | SSE       | `sse_client_example.py` / `make client-daw`     | Yes   |
+| `faust_server_daw.py`      | stdio     | `stdio_client_example.py`                       | Yes   |
+| `faust_realtime_server.py` | SSE       | `sse_client_example.py`                         | Yes   |
+| `faust_realtime_server.py` | stdio     | `stdio_client_example.py`                       | Yes   |
 
 ## Client configuration examples
 
