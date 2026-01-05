@@ -60,6 +60,7 @@ let faustNode = null;
 let faustJson = null;
 let paramsCache = [];
 let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParamHandler
+let meterUnitsByPath = {};
 let uiServer = null;
 let dspName = null;
 let fileSourceNode = null;  // For file input playback
@@ -86,19 +87,19 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideMeters) 
     if (includeInputMeters) {
       defs.push(
         '// Input meters',
-        `mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i${hiddenTag}", -60, 0))) : attach;`,
-        `mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i${hiddenTag}", -60, 0))) : attach;`,
+        `mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
+        `mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
         'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
         'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
       );
     }
     defs.push(
       '// Output meters',
-      `mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i${hiddenTag}", -60, 0))) : attach;`,
-      `mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i${hiddenTag}", -60, 0))) : attach;`,
+      `mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
+      `mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
       'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
-      `mcp_out_mix_peak = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[2]Mix Peak${hiddenTag}", -60, 0))) : attach;`,
-      `mcp_out_mix_rms = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[3]Mix RMS${hiddenTag}", -60, 0))) : attach;`,
+      `mcp_out_mix_peak = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[2]Mix Peak${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
+      `mcp_out_mix_rms = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[3]Mix RMS${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
       'mcp_out_mix_meter = mcp_out_mix_peak : mcp_out_mix_rms;',
       'mcp_out_mix_signal(FX) = par(i, outputs(FX), _) :> _;',
       'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i)), (mcp_out_mix_signal(FX) : mcp_out_mix_meter);',  
@@ -256,14 +257,16 @@ function computeAudioMetrics() {
 
   for (const [path, value] of Object.entries(outputParamsCache)) {
     const normalizedPath = normalizeMeterPath(path);
+    const unit = meterUnitsByPath[path] ?? null;
+    const mappedValue = unit === 'dB' ? dbToLinear(value) : value;
     if (mixPeakRegex.test(normalizedPath)) {
-      const peak = dbToLinear(value);
+      const peak = mappedValue;
       mixPeak = peak;
       if (Number.isNaN(peak)) hasNaN = true;
       continue;
     }
     if (mixRmsRegex.test(normalizedPath)) {
-      const rms = dbToLinear(value);
+      const rms = mappedValue;
       mixRms = rms;
       if (Number.isNaN(rms)) hasNaN = true;
       continue;
@@ -277,12 +280,12 @@ function computeAudioMetrics() {
       channels[idx] = { rms: null, peak: null };
     }
     if (peakMatch) {
-      const peak = dbToLinear(value);
+      const peak = mappedValue;
       channels[idx].peak = peak;
       if (Number.isNaN(peak)) hasNaN = true;
     }
     if (rmsMatch) {
-      const rms = dbToLinear(value);
+      const rms = mappedValue;
       channels[idx].rms = rms;
       if (Number.isNaN(rms)) hasNaN = true;
     }
@@ -392,6 +395,26 @@ function collectParams(items, acc) {
   }
 }
 
+function collectBargraphUnits(items, acc) {
+  // Recursively traverse UI items and collect bargraph units by address.
+  for (const item of items || []) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.items) {
+      collectBargraphUnits(item.items, acc);
+      continue;
+    }
+
+    const type = item.type;
+    const isBargraph = ['hbargraph', 'vbargraph'].includes(type);
+    if (!isBargraph) continue;
+
+    const meta = metaToObject(item.meta);
+    if (typeof item.address === 'string') {
+      acc[item.address] = meta.unit ?? null;
+    }
+  }
+}
+
 /**
  * Extract parameter descriptors from a Faust JSON object.
  * @param {object|undefined|null} jsonObj
@@ -401,6 +424,17 @@ function extractParamsFromJson(jsonObj) {
   const params = [];
   collectParams(jsonObj?.ui || [], params);
   return params;
+}
+
+/**
+ * Extract bargraph units (by address) from a Faust JSON object.
+ * @param {object|undefined|null} jsonObj
+ * @returns {Object<string, string|null>}
+ */
+function extractBargraphUnits(jsonObj) {
+  const units = {};
+  collectBargraphUnits(jsonObj?.ui || [], units);
+  return units;
 }
 
 /**
@@ -536,6 +570,7 @@ async function compileAndStart({
   faustJson = JSON.parse(jsonStr);
   dspName = faustJson?.name || name || null;
   paramsCache = extractParamsFromJson(faustJson);
+  meterUnitsByPath = extractBargraphUnits(faustJson);
 
   const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
 
@@ -682,6 +717,7 @@ async function stop() {
   faustJson = null;
   paramsCache = [];
   outputParamsCache = {};
+  meterUnitsByPath = {};
   return { status: 'stopped' };
 }
 

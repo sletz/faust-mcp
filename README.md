@@ -421,10 +421,11 @@ code. The wrapper adds output meters for each channel and a mono mix meter
 injected when `input_source` is `sine`, `noise`, or `file`. If you want to hide
 the meters in compatible UIs, pass `hide_meters=true` to `compile_and_start`.
 
-Bargraphs report values in dB (typically about -60 to 0 dB), while
-`get_audio_metrics()` converts those to linear amplitude before returning them.
-The conversion is `linear = 10^(dB/20)`, so you can apply linear thresholds like
-`rms < 0.001` for silence detection or `peak > 1.0` for clipping heuristics.
+When a bargraph includes `[unit:dB]` metadata, `get_audio_metrics()` converts its
+value to linear amplitude before returning it. The conversion is
+`linear = 10^(dB/20)`, so you can apply linear thresholds like `rms < 0.001` for
+silence detection or `peak > 1.0` for clipping heuristics. Bargraphs without the
+`[unit:dB]` tag are returned as-is.
 
 ```json
 {
