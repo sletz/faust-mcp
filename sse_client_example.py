@@ -20,6 +20,7 @@ async def main(
     input_source: str | None,
     input_freq: float | None,
     input_file: str | None,
+    hide_meters: bool,
     param_path: str | None,
     param_value: float | None,
     param_values: list[str] | None,
@@ -51,6 +52,8 @@ async def main(
                         args["name"] = name
                     if latency_hint:
                         args["latency_hint"] = latency_hint
+                    if hide_meters:
+                        args["hide_meters"] = True
                 elif tool == "check_syntax" and name:
                     args["name"] = name
             elif tool == "get_param":
@@ -73,7 +76,7 @@ async def main(
                 if not param_path or param_value is None:
                     raise ValueError("--param-path and --param-value are required for set_param")
                 args = {"path": param_path, "value": param_value}
-            elif tool in ("get_params", "stop"):
+            elif tool in ("get_params", "get_audio_metrics", "stop"):
                 args = {}
             else:
                 raise ValueError(f"Unsupported tool: {tool}")
@@ -97,7 +100,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, set_param_values, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, get_audio_metrics, set_param_values, set_param, stop).",
     )
     parser.add_argument(
         "--name",
@@ -124,6 +127,11 @@ if __name__ == "__main__":
         "--input-file",
         default=None,
         help="Input file path for file test input (DawDreamer/RT only).",
+    )
+    parser.add_argument(
+        "--hide-meters",
+        action="store_true",
+        help="Hide meter bargraphs with [hidden:1] (RT only).",
     )
     parser.add_argument(
         "--param-path",
@@ -159,6 +167,7 @@ if __name__ == "__main__":
         args.input_source,
         args.input_freq,
         args.input_file,
+        args.hide_meters,
         args.param_path,
         args.param_value,
         args.param_values,

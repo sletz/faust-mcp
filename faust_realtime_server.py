@@ -6,8 +6,9 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 (`faust_realtime_worker.mjs`) and communicates via a JSON-over-stdin protocol.
 
 Tools:
-  - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?)
+  - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
   - check_syntax(faust_code, name?)
+  - get_audio_metrics()
   - get_params()
   - get_param(path)
   - get_param_values()
@@ -153,6 +154,7 @@ def compile_and_start(
     input_source: str = "none",
     input_freq: float | None = None,
     input_file: str | None = None,
+    hide_meters: bool = False,
 ) -> str:
     """
     Compile Faust DSP code, start real-time audio, and return parameter metadata.
@@ -170,6 +172,7 @@ def compile_and_start(
             "input_source": input_source,
             "input_freq": input_freq,
             "input_file": input_file,
+            "hide_meters": hide_meters,
         },
     )
     return json.dumps(result, indent=2)
@@ -204,6 +207,14 @@ def get_param_values() -> str:
     """Get current values for all parameters on the running DSP."""
 
     result = worker.request("get_param_values")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_audio_metrics() -> str:
+    """Get RMS/Peak metering for the output channels."""
+
+    result = worker.request("get_audio_metrics")
     return json.dumps(result, indent=2)
 
 

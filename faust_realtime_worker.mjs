@@ -70,12 +70,62 @@ let fileSourceNode = null;  // For file input playback
  * @param {string} inputSource
  * @param {number|undefined|null} inputFreq
  * @param {string|undefined|null} inputFile
+ * @param {boolean} hideMeters
  * @returns {string}
  */
-function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
+function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideMeters) {
   const source = (inputSource || 'none').trim().toLowerCase();
+  const hiddenTag = hideMeters ? '[hidden:1]' : '';
+
+  // Shared meter definitions to keep wrapper variants in sync.
+  const buildMeteringDefs = (includeInputMeters) => {
+    const defs = [
+      '// Metering (Peak + RMS per channel)',
+      'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
+    ];
+    if (includeInputMeters) {
+      defs.push(
+        '// Input meters',
+        `mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i${hiddenTag}", -60, 0))) : attach;`,
+        `mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i${hiddenTag}", -60, 0))) : attach;`,
+        'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
+        'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
+      );
+    }
+    defs.push(
+      '// Output meters',
+      `mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i${hiddenTag}", -60, 0))) : attach;`,
+      `mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i${hiddenTag}", -60, 0))) : attach;`,
+      'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
+      `mcp_out_mix_peak = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[2]Mix Peak${hiddenTag}", -60, 0))) : attach;`,
+      `mcp_out_mix_rms = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[3]Mix RMS${hiddenTag}", -60, 0))) : attach;`,
+      'mcp_out_mix_meter = mcp_out_mix_peak : mcp_out_mix_rms;',
+      'mcp_out_mix_signal(FX) = par(i, outputs(FX), _) :> _;',
+      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i)), (mcp_out_mix_signal(FX) : mcp_out_mix_meter);',  
+      '',
+    );
+    return defs;
+  };
   if (source === 'none') {
-    return { code: dspCode, useExternalInput: false };
+    const indented = String(dspCode)
+      .split('\n')
+      .map((line) => (line.trim() ? `  ${line}` : line))
+      .join('\n');
+
+    const meteringDefs = buildMeteringDefs(false);
+
+    const wrappedCode = [
+      'import("stdfaust.lib");',
+      '',
+      ...meteringDefs,
+      '// User DSP',
+      'mcp_dsp = environment {',
+      indented,
+      '};',
+      'process = mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);',
+    ].join('\n');
+
+    return { code: wrappedCode, useExternalInput: false };
   }
   if (source !== 'sine' && source !== 'noise' && source !== 'file') {
     throw new Error(`Unsupported input_source: ${inputSource}`);
@@ -93,21 +143,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       .join('\n');
 
     // Adaptive metering for N inputs/outputs
-    const meteringDefs = [
-      '// Metering (Peak + RMS per channel)',
-      'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-      '// Input meters',
-      'mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
-      'mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
-      'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
-      'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
-      '// Output meters',
-      'mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
-      'mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
-      'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
-      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i));',
-      '',
-    ];
+    const meteringDefs = buildMeteringDefs(true);
 
     // HTTP/HTTPS URLs: use FAUST soundfile (works with fetch)
     if (inputFile.startsWith('http://') || inputFile.startsWith('https://')) {
@@ -124,7 +160,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
         'mcp_dsp = environment {',
         indented,
         '};',
-        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test) : mcp_output_meters(mcp_dsp.process);',
+        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test) <: mcp_output_meters(mcp_dsp.process);',
       ].join('\n');
 
       return { code: wrappedCode, useExternalInput: false };
@@ -140,7 +176,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
       'mcp_dsp = environment {',
       indented,
       '};',
-      'process = mcp_input_meters(mcp_dsp.process) : mcp_dsp.process : mcp_output_meters(mcp_dsp.process);',
+      'process = mcp_input_meters(mcp_dsp.process) : mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);',
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: true, inputFile };
@@ -161,21 +197,7 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     .join('\n');
 
   // Adaptive metering for N inputs/outputs
-  const meteringDefs = [
-    '// Metering (Peak + RMS per channel)',
-    'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-    '// Input meters',
-    'mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
-    'mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
-    'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
-    'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
-    '// Output meters',
-    'mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i", -60, 0))) : attach;',
-    'mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i", -60, 0))) : attach;',
-    'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
-    'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i));',
-    '',
-  ];
+  const meteringDefs = buildMeteringDefs(true);
 
   const wrappedCode = [
     'import("stdfaust.lib");',
@@ -186,10 +208,98 @@ function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile) {
     'mcp_dsp = environment {',
     indented,
     '};',
-    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_input_meters(mcp_dsp.process) : mcp_dsp.process : mcp_output_meters(mcp_dsp.process);`,
+    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_input_meters(mcp_dsp.process) : mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);`,
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
+}
+
+/**
+ * Convert dB values back to linear amplitude.
+ * @param {number} db
+ * @returns {number}
+ */
+function dbToLinear(db) {
+  if (!Number.isFinite(db)) return NaN;
+  return Math.pow(10, db / 20);
+}
+
+/**
+ * Normalize a Faust UI path by stripping UI layout prefixes and ordering tags.
+ * @param {string} path
+ * @returns {string}
+ */
+function normalizeMeterPath(path) {
+  return path
+    .replace(/^\/[^/]+\//, "")
+    .replace(/v:/g, "")
+    .replace(/\/\[\d+\]/g, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/ch\s*(\d+)/g, "ch$1")
+    .trim();
+}
+
+/**
+ * Compute output metering (RMS/Peak) from cached bargraph values.
+ * @returns {{ mix: { rms: number, peak: number, hasNaN: boolean }, channels: Array<{ rms: number|null, peak: number|null }> }}
+ */
+function computeAudioMetrics() {
+  const peakRegex = /Output Meters\/Peak ch(\d+)/;
+  const rmsRegex = /Output Meters\/RMS ch(\d+)/;
+  const mixPeakRegex = /Output Meters\/Mix Peak/;
+  const mixRmsRegex = /Output Meters\/Mix RMS/;
+  const channels = [];
+  let hasNaN = false;
+  let mixRms = null;
+  let mixPeak = null;
+
+  for (const [path, value] of Object.entries(outputParamsCache)) {
+    const normalizedPath = normalizeMeterPath(path);
+    if (mixPeakRegex.test(normalizedPath)) {
+      const peak = dbToLinear(value);
+      mixPeak = peak;
+      if (Number.isNaN(peak)) hasNaN = true;
+      continue;
+    }
+    if (mixRmsRegex.test(normalizedPath)) {
+      const rms = dbToLinear(value);
+      mixRms = rms;
+      if (Number.isNaN(rms)) hasNaN = true;
+      continue;
+    }
+    const peakMatch = normalizedPath.match(peakRegex);
+    const rmsMatch = normalizedPath.match(rmsRegex);
+    if (!peakMatch && !rmsMatch) continue;
+    const idx = parseInt((peakMatch || rmsMatch)[1], 10);
+    if (!Number.isFinite(idx)) continue;
+    if (!channels[idx]) {
+      channels[idx] = { rms: null, peak: null };
+    }
+    if (peakMatch) {
+      const peak = dbToLinear(value);
+      channels[idx].peak = peak;
+      if (Number.isNaN(peak)) hasNaN = true;
+    }
+    if (rmsMatch) {
+      const rms = dbToLinear(value);
+      channels[idx].rms = rms;
+      if (Number.isNaN(rms)) hasNaN = true;
+    }
+  }
+
+  const definedChannels = channels.filter(Boolean);
+
+  const resolvedMixRms = mixRms ?? 0;
+  const resolvedMixPeak = mixPeak ?? 0;
+  return {
+    mix: {
+      rms: resolvedMixRms,
+      peak: resolvedMixPeak,
+      hasNaN,
+    },
+    channels: definedChannels,
+  };
 }
 
 /**
@@ -334,6 +444,7 @@ async function compileAndStart({
   input_source,
   input_freq,
   input_file,
+  hide_meters,
 }) {
   // Compile DSP, create AudioWorklet node, connect, and start.
   await initFaust();
@@ -362,7 +473,13 @@ async function compileAndStart({
   audioContext = new AudioContext({ latencyHint: hint });
 
   const generator = new FaustMonoDspGenerator();
-  const wrapped = wrapTestInputs(dsp_code, input_source, input_freq, input_file);
+  const wrapped = wrapTestInputs(
+    dsp_code,
+    input_source,
+    input_freq,
+    input_file,
+    hide_meters,
+  );
   const compiled = await generator.compile(compiler, name, wrapped.code, '-ftz 2');
   if (!compiled) {
     throw new Error('Faust compilation failed');
@@ -500,6 +617,15 @@ async function getParamValues() {
   }
 
   return { status: 'ok', values };
+}
+
+/**
+ * Return RMS/Peak metering for the output channels.
+ * @returns {Promise<object>}
+ */
+async function getAudioMetrics() {
+  ensureRunning();
+  return computeAudioMetrics();
 }
 
 /**
@@ -692,6 +818,7 @@ const handlers = {
   get_param: getParam,
   get_params: getParams,
   get_param_values: getParamValues,
+  get_audio_metrics: getAudioMetrics,
   set_param_values: setParamValues,
   stop,
 };

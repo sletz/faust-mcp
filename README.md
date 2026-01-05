@@ -52,7 +52,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `stop`.
 - Offline tools: `compile_and_analyze`.
 - DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
@@ -404,19 +404,56 @@ Then open:
 
 ### Real-time tools
 
-- `compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?)`
+- `compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)`
 - `check_syntax(faust_code, name?)`
 - `get_params()`
 - `get_param(path)`
 - `get_param_values()`
+- `get_audio_metrics()`
 - `set_param_values(values)`
 - `set_param(path, value)`
 - `stop()`
 
+`get_audio_metrics()` returns RMS/peak metering derived from bargraphs that are
+automatically injected by the real-time server when it wraps your Faust DSP
+code. The wrapper adds output meters for each channel and a mono mix meter
+(Mix Peak/Mix RMS). Output meters are always injected; input meters are only
+injected when `input_source` is `sine`, `noise`, or `file`. If you want to hide
+the meters in compatible UIs, pass `hide_meters=true` to `compile_and_start`.
+
+Bargraphs report values in dB (typically about -60 to 0 dB), while
+`get_audio_metrics()` converts those to linear amplitude before returning them.
+The conversion is `linear = 10^(dB/20)`, so you can apply linear thresholds like
+`rms < 0.001` for silence detection or `peak > 1.0` for clipping heuristics.
+
+```json
+{
+  "mix": { "rms": 0.23, "peak": 0.45, "hasNaN": false },
+  "channels": [
+    { "rms": 0.20, "peak": 0.42 },
+    { "rms": 0.25, "peak": 0.48 }
+  ]
+}
+```
+
 `latency_hint` accepts `interactive` (default) or `playback`.
 `input_source` accepts `none` (default), `sine`, `noise`, or `file`. `input_freq`
 sets the sine frequency in Hz (default 1000). `input_file` sets the path for a
-soundfile input when `input_source=file`.
+soundfile input when `input_source=file`. `hide_meters` (default `false`) appends
+`[hidden:1]` to the meter bargraph labels so compatible UIs can hide them.
+
+Example (hide meter bargraphs):
+
+```bash
+make rt-compile DSP=t2.dsp HIDE_METERS=1
+```
+
+Stdio client example:
+
+```bash
+python3 stdio_client_example.py --server faust_realtime_server.py \
+  --tool compile_and_start --dsp t2.dsp --hide-meters
+```
 
 For the real-time server (faustwasm), soundfiles must be served over HTTP/HTTPS.
 To test local files, start a simple server in the repo root:
@@ -626,6 +663,7 @@ make run-rt-stdio-session
 make rt-compile DSP=t1.dsp RT_NAME=osc1
 make rt-get-params
 make rt-get-param RT_PARAM_PATH=/freq
+make rt-get-audio-metrics
 make rt-set-param RT_PARAM_PATH=/freq RT_PARAM_VALUE=440
 make rt-stop
 make stop-rt

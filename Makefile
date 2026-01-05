@@ -12,6 +12,7 @@ FAUST_UI_ROOT ?=
 INPUT_SOURCE ?=
 INPUT_FREQ ?=
 INPUT_FILE ?=
+HIDE_METERS ?= 0
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
@@ -19,7 +20,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-set-param rt-stop stop-rt
+.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-set-param rt-stop stop-rt
 
 help:
 	@printf "Targets:\n"
@@ -47,6 +48,7 @@ help:
 	@printf "  rt-get-params Get params from real-time server\n"
 	@printf "  rt-get-param  Get a param value from real-time server\n"
 	@printf "  rt-get-param-values Get all param values from real-time server\n"
+	@printf "  rt-get-audio-metrics Get RMS/Peak metering from real-time server\n"
 	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
 	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
@@ -69,6 +71,7 @@ help:
 	@printf "  INPUT_SOURCE=%s\n" "$(INPUT_SOURCE)"
 	@printf "  INPUT_FREQ=%s\n" "$(INPUT_FREQ)"
 	@printf "  INPUT_FILE=%s\n" "$(INPUT_FILE)"
+	@printf "  HIDE_METERS=%s\n" "$(HIDE_METERS)"
 
 setup:
 	@mkdir -p $(TMPDIR)
@@ -142,13 +145,15 @@ client-rt:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
 		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
 		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
-		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),)
+		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),) \
+		$(if $(filter 1 true yes,$(HIDE_METERS)),--hide-meters,)
 
 rt-compile:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
 		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
 		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
-		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),)
+		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),) \
+		$(if $(filter 1 true yes,$(HIDE_METERS)),--hide-meters,)
 
 rt-get-params:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_params
@@ -158,6 +163,9 @@ rt-get-param:
 
 rt-get-param-values:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_param_values
+
+rt-get-audio-metrics:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics
 
 rt-set-param:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool set_param --param-path $(RT_PARAM_PATH) --param-value $(RT_PARAM_VALUE)
