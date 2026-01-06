@@ -62,6 +62,7 @@ let paramsCache = [];
 let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParamHandler
 let meterUnitsByPath = {};
 let meterProbesByPath = {};
+let analyserNode = null;
 let uiServer = null;
 let dspName = null;
 let fileSourceNode = null;  // For file input playback
@@ -349,6 +350,95 @@ function computeAudioMetrics() {
   };
 }
 
+function collectScopeData(analyser, edgeThreshold) {
+  const sampleCount = analyser.frequencyBinCount;
+  const timeData = new Float32Array(sampleCount);
+  analyser.getFloatTimeDomainData(timeData);
+
+  let risingEdge = 0;
+  while (
+    timeData[risingEdge] > 0 &&
+    risingEdge < timeData.length
+  ) {
+    risingEdge++;
+  }
+
+  if (risingEdge >= timeData.length) risingEdge = 0;
+
+  while (
+    timeData[risingEdge] < edgeThreshold &&
+    risingEdge < timeData.length
+  ) {
+    risingEdge++;
+  }
+
+  if (risingEdge >= timeData.length) risingEdge = 0;
+
+  const samples = new Array(timeData.length);
+  for (let i = 0; i < timeData.length; i++) {
+    samples[i] = timeData[(risingEdge + i) % timeData.length];
+  }
+
+  return { samples, rising_edge_index: risingEdge };
+}
+
+function collectSpectrumData(analyser, audioContext, logBins) {
+  const binCount = analyser.frequencyBinCount;
+  const freqData = new Float32Array(binCount);
+  const freqs = new Array(binCount);
+  const fftSize = analyser.fftSize;
+  const sampleRate = audioContext?.sampleRate ?? 44100;
+
+  if (typeof analyser.getFloatFrequencyData === 'function') {
+    analyser.getFloatFrequencyData(freqData);
+  } else {
+    const byteData = new Uint8Array(binCount);
+    analyser.getByteFrequencyData(byteData);
+    for (let i = 0; i < binCount; i++) {
+      freqData[i] = (byteData[i] / 255) * (analyser.maxDecibels - analyser.minDecibels) + analyser.minDecibels;
+    }
+  }
+
+  for (let i = 0; i < binCount; i++) {
+    freqs[i] = (i * sampleRate) / fftSize;
+  }
+
+  const spectrum = {
+    fft_size: fftSize,
+    min_db: analyser.minDecibels,
+    max_db: analyser.maxDecibels,
+    smoothing: analyser.smoothingTimeConstant,
+    bins_db: Array.from(freqData),
+    freqs_hz: freqs,
+  };
+
+  if (Number.isFinite(logBins) && logBins > 0) {
+    const logBinCount = Math.floor(logBins);
+    const logBinsDb = new Array(logBinCount).fill(-Infinity);
+    const logFreqs = new Array(logBinCount).fill(0);
+    const minFreq = 20;
+    const maxFreq = sampleRate / 2;
+    for (let i = 0; i < logBinCount; i++) {
+      const t0 = i / logBinCount;
+      const t1 = (i + 1) / logBinCount;
+      const f0 = minFreq * Math.pow(maxFreq / minFreq, t0);
+      const f1 = minFreq * Math.pow(maxFreq / minFreq, t1);
+      logFreqs[i] = Math.sqrt(f0 * f1);
+      const start = Math.max(0, Math.floor((f0 / maxFreq) * binCount));
+      const end = Math.min(binCount - 1, Math.ceil((f1 / maxFreq) * binCount));
+      let maxVal = -Infinity;
+      for (let b = start; b <= end; b++) {
+        if (freqData[b] > maxVal) maxVal = freqData[b];
+      }
+      logBinsDb[i] = maxVal;
+    }
+    spectrum.log_bins_db = logBinsDb;
+    spectrum.log_freqs_hz = logFreqs;
+  }
+
+  return spectrum;
+}
+
 /**
  * Initialize the Faust compiler and WebAudio classes.
  * @returns {Promise<object>}
@@ -593,7 +683,13 @@ async function compileAndStart({
     });
   }
 
-  faustNode.connect(audioContext.destination);
+  analyserNode = audioContext.createAnalyser();
+  analyserNode.fftSize = Math.pow(2, 11);
+  analyserNode.minDecibels = -96;
+  analyserNode.maxDecibels = 0;
+  analyserNode.smoothingTimeConstant = 0.85;
+  faustNode.connect(analyserNode);
+  analyserNode.connect(audioContext.destination);
 
   // Handle file input: load audio file and connect to FAUST input
   if (wrapped.useExternalInput && wrapped.inputFile) {
@@ -721,7 +817,47 @@ async function getParamValues() {
  */
 async function getAudioMetrics() {
   ensureRunning();
-  return computeAudioMetrics();
+  const {
+    include_scope = false,
+    include_spectrum = false,
+    fft_size,
+    smoothing,
+    min_db,
+    max_db,
+    edge_threshold = 0.09,
+    log_bins,
+  } = arguments.length > 0 && arguments[0] ? arguments[0] : {};
+
+  if (analyserNode) {
+    if (Number.isFinite(fft_size) && fft_size > 0) {
+      analyserNode.fftSize = fft_size;
+    }
+    if (Number.isFinite(smoothing)) {
+      analyserNode.smoothingTimeConstant = smoothing;
+    }
+    if (Number.isFinite(min_db)) {
+      analyserNode.minDecibels = min_db;
+    }
+    if (Number.isFinite(max_db)) {
+      analyserNode.maxDecibels = max_db;
+    }
+  }
+
+  const metrics = computeAudioMetrics();
+  if (include_scope && analyserNode) {
+    const scope = collectScopeData(analyserNode, edge_threshold);
+    metrics.scope = {
+      sample_rate: audioContext?.sampleRate ?? null,
+      fft_size: analyserNode.fftSize,
+      edge_threshold,
+      rising_edge_index: scope.rising_edge_index,
+      samples: scope.samples,
+    };
+  }
+  if (include_spectrum && analyserNode) {
+    metrics.spectrum = collectSpectrumData(analyserNode, audioContext, log_bins);
+  }
+  return metrics;
 }
 
 /**
@@ -775,6 +911,7 @@ async function stop() {
   }
   faustNode = null;
   audioContext = null;
+  analyserNode = null;
   faustJson = null;
   paramsCache = [];
   outputParamsCache = {};

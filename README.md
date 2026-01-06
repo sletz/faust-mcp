@@ -409,7 +409,7 @@ Then open:
 - `get_params()`
 - `get_param(path)`
 - `get_param_values()`
-- `get_audio_metrics()`
+- `get_audio_metrics(include_scope?, include_spectrum?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)`
 - `set_param_values(values)`
 - `set_param(path, value)`
 - `stop()`
@@ -439,6 +439,15 @@ If a bargraph includes `[probe:N]` metadata (with `N` as an integer), its value
 is added to the `probes` array in `get_audio_metrics()` as `{ id, value }`. This
 lets MCP clients inject extra metering probes into the DSP graph and retrieve
 them alongside the standard mix/channel meters.
+
+Optional scope/spectrum capture:
+- `include_scope`: include time-domain samples aligned to a rising edge.
+- `include_spectrum`: include FFT bins (dB) and frequency axis.
+- `fft_size`, `smoothing`, `min_db`, `max_db`, `edge_threshold`, `log_bins`: analyser tuning.
+Makefile helpers:
+- `make rt-get-audio-metrics-scope`
+- `make rt-get-audio-metrics-spectrum`
+- `make rt-get-audio-metrics-full`
 
 ```json
 {

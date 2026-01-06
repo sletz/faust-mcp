@@ -20,7 +20,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-set-param rt-stop stop-rt
+.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-set-param rt-stop stop-rt
 
 help:
 	@printf "Targets:\n"
@@ -49,6 +49,9 @@ help:
 	@printf "  rt-get-param  Get a param value from real-time server\n"
 	@printf "  rt-get-param-values Get all param values from real-time server\n"
 	@printf "  rt-get-audio-metrics Get RMS/Peak metering from real-time server\n"
+	@printf "  rt-get-audio-metrics-scope Get time-domain scope samples\n"
+	@printf "  rt-get-audio-metrics-spectrum Get spectrum FFT bins\n"
+	@printf "  rt-get-audio-metrics-full Get scope + spectrum metrics\n"
 	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
 	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
@@ -166,6 +169,15 @@ rt-get-param-values:
 
 rt-get-audio-metrics:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics
+
+rt-get-audio-metrics-scope:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics --include-scope
+
+rt-get-audio-metrics-spectrum:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics --include-spectrum
+
+rt-get-audio-metrics-full:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics --include-scope --include-spectrum
 
 rt-set-param:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool set_param --param-path $(RT_PARAM_PATH) --param-value $(RT_PARAM_VALUE)

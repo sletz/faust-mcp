@@ -21,6 +21,14 @@ async def main(
     input_freq: float | None,
     input_file: str | None,
     hide_meters: bool,
+    include_scope: bool,
+    include_spectrum: bool,
+    fft_size: int | None,
+    smoothing: float | None,
+    min_db: float | None,
+    max_db: float | None,
+    edge_threshold: float | None,
+    log_bins: int | None,
     param_path: str | None,
     param_value: float | None,
     param_values: list[str] | None,
@@ -78,6 +86,23 @@ async def main(
                 args = {"path": param_path, "value": param_value}
             elif tool in ("get_params", "get_audio_metrics", "stop"):
                 args = {}
+                if tool == "get_audio_metrics":
+                    if include_scope:
+                        args["include_scope"] = True
+                    if include_spectrum:
+                        args["include_spectrum"] = True
+                    if fft_size is not None:
+                        args["fft_size"] = fft_size
+                    if smoothing is not None:
+                        args["smoothing"] = smoothing
+                    if min_db is not None:
+                        args["min_db"] = min_db
+                    if max_db is not None:
+                        args["max_db"] = max_db
+                    if edge_threshold is not None:
+                        args["edge_threshold"] = edge_threshold
+                    if log_bins is not None:
+                        args["log_bins"] = log_bins
             else:
                 raise ValueError(f"Unsupported tool: {tool}")
 
@@ -134,6 +159,52 @@ if __name__ == "__main__":
         help="Hide meter bargraphs with [hidden:1] (RT only).",
     )
     parser.add_argument(
+        "--include-scope",
+        action="store_true",
+        help="Include time-domain scope samples in get_audio_metrics.",
+    )
+    parser.add_argument(
+        "--include-spectrum",
+        action="store_true",
+        help="Include spectrum FFT bins in get_audio_metrics.",
+    )
+    parser.add_argument(
+        "--fft-size",
+        type=int,
+        default=None,
+        help="FFT size for scope/spectrum (get_audio_metrics).",
+    )
+    parser.add_argument(
+        "--smoothing",
+        type=float,
+        default=None,
+        help="Smoothing constant for spectrum (get_audio_metrics).",
+    )
+    parser.add_argument(
+        "--min-db",
+        type=float,
+        default=None,
+        help="Minimum decibels for spectrum (get_audio_metrics).",
+    )
+    parser.add_argument(
+        "--max-db",
+        type=float,
+        default=None,
+        help="Maximum decibels for spectrum (get_audio_metrics).",
+    )
+    parser.add_argument(
+        "--edge-threshold",
+        type=float,
+        default=None,
+        help="Rising-edge threshold for scope alignment (get_audio_metrics).",
+    )
+    parser.add_argument(
+        "--log-bins",
+        type=int,
+        default=None,
+        help="Number of log-spaced spectrum bins to return (get_audio_metrics).",
+    )
+    parser.add_argument(
         "--param-path",
         default=None,
         help="Parameter path for get_param/set_param.",
@@ -168,6 +239,14 @@ if __name__ == "__main__":
         args.input_freq,
         args.input_file,
         args.hide_meters,
+        args.include_scope,
+        args.include_spectrum,
+        args.fft_size,
+        args.smoothing,
+        args.min_db,
+        args.max_db,
+        args.edge_threshold,
+        args.log_bins,
         args.param_path,
         args.param_value,
         args.param_values,
