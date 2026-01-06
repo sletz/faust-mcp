@@ -63,6 +63,12 @@ let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParam
 let meterUnitsByPath = {};
 let meterProbesByPath = {};
 let analyserNode = null;
+let analyserDefaults = {
+  fft_size: Math.pow(2, 11),
+  min_db: -96,
+  max_db: 0,
+  smoothing: 0.85,
+};
 let channelSplitter = null;
 let channelAnalysers = [];
 let uiServer = null;
@@ -441,13 +447,114 @@ function collectSpectrumData(analyser, audioContext, logBins) {
   return spectrum;
 }
 
+/**
+ * Build scope payload for get_audio_metrics (including samples + metadata).
+ * @param {AnalyserNode} analyser
+ * @param {object} opts
+ * @returns {object}
+ */
+function collectScopePayload(analyser, {
+  edge_threshold,
+  sample_rate,
+} = {}) {
+  const scope = collectScopeData(analyser, edge_threshold);
+  return {
+    sample_rate,
+    fft_size: analyser.fftSize,
+    edge_threshold,
+    rising_edge_index: scope.rising_edge_index,
+    samples: scope.samples,
+  };
+}
+
+/**
+ * Build spectrum payload for get_audio_metrics (including bins + metadata).
+ * @param {AnalyserNode} analyser
+ * @param {AudioContext|null} audioContext
+ * @param {object} opts
+ * @returns {object}
+ */
+function collectSpectrumPayload(analyser, audioContext, {
+  log_bins,
+} = {}) {
+  return collectSpectrumData(analyser, audioContext, log_bins);
+}
+
 function createAnalyserWithDefaults(audioContext) {
   const analyser = audioContext.createAnalyser();
-  analyser.fftSize = Math.pow(2, 11);
-  analyser.minDecibels = -96;
-  analyser.maxDecibels = 0;
-  analyser.smoothingTimeConstant = 0.85;
+  applyAnalyserConfig(analyser, analyserDefaults);
   return analyser;
+}
+
+/**
+ * Apply analyser configuration overrides (FFT size, dB range, smoothing).
+ * @param {AnalyserNode|null} analyser
+ * @param {object} opts
+ */
+function applyAnalyserConfig(analyser, {
+  fft_size,
+  smoothing,
+  min_db,
+  max_db,
+} = {}) {
+  if (!analyser) return;
+  if (Number.isFinite(fft_size) && fft_size > 0) {
+    analyser.fftSize = fft_size;
+  }
+  if (Number.isFinite(smoothing)) {
+    analyser.smoothingTimeConstant = smoothing;
+  }
+  if (Number.isFinite(min_db)) {
+    analyser.minDecibels = min_db;
+  }
+  if (Number.isFinite(max_db)) {
+    analyser.maxDecibels = max_db;
+  }
+}
+
+/**
+ * Sync analyser configuration across global + per-channel analysers.
+ * @param {object} opts
+ */
+function syncAnalyserConfig(opts = {}) {
+  applyAnalyserConfig(analyserNode, opts);
+  channelAnalysers.forEach((analyser) => applyAnalyserConfig(analyser, opts));
+  analyserDefaults = {
+    fft_size: opts.fft_size ?? analyserDefaults.fft_size,
+    min_db: opts.min_db ?? analyserDefaults.min_db,
+    max_db: opts.max_db ?? analyserDefaults.max_db,
+    smoothing: opts.smoothing ?? analyserDefaults.smoothing,
+  };
+}
+
+/**
+ * Normalize get_audio_metrics options with defaults.
+ * @param {object} opts
+ * @returns {object}
+ */
+function normalizeAudioMetricsOptions(opts = {}) {
+  const {
+    include_scope = false,
+    include_spectrum = false,
+    per_channel = false,
+    fft_size,
+    smoothing,
+    min_db,
+    max_db,
+    edge_threshold = 0.09,
+    log_bins,
+  } = opts;
+  return {
+    include_scope,
+    include_spectrum,
+    per_channel,
+    fft_size,
+    smoothing,
+    min_db,
+    max_db,
+    edge_threshold,
+    log_bins,
+  };
 }
 
 function ensureChannelAnalysers() {
@@ -456,9 +563,11 @@ function ensureChannelAnalysers() {
   const channelCount = Math.max(1, outputChannels);
   channelSplitter = audioContext.createChannelSplitter(channelCount);
   faustNode.connect(channelSplitter);
-  channelAnalysers = Array.from({ length: channelCount }, () =>
-    createAnalyserWithDefaults(audioContext)
-  );
+  channelAnalysers = Array.from({ length: channelCount }, () => {
+    const analyser = createAnalyserWithDefaults(audioContext);
+    applyAnalyserConfig(analyser, analyserDefaults);
+    return analyser;
+  });
   channelAnalysers.forEach((analyser, idx) => {
     channelSplitter.connect(analyser, idx);
   });
@@ -833,51 +942,52 @@ async function getParamValues() {
 }
 
 /**
- * Return RMS/Peak metering for the output channels.
+ * Return RMS/Peak metering for the running DSP (with optional scope/spectrum).
+ *
+ * Options:
+ * - include_scope: include time-domain samples aligned to a rising edge
+ * - include_spectrum: include FFT bins (dB) and frequency axis
+ * - per_channel: include per-channel scope/spectrum arrays
+ * - fft_size, smoothing, min_db, max_db, edge_threshold, log_bins: analyser tuning
+ *
+ * Response shape:
+ * - input.channels / output.mix / output.channels / probes
+ * - optional scope + spectrum blocks (with optional per-channel arrays)
+ *
  * @returns {Promise<object>}
  */
 async function getAudioMetrics() {
   ensureRunning();
   const {
-    include_scope = false,
-    include_spectrum = false,
-    per_channel = false,
+    include_scope,
+    include_spectrum,
+    per_channel,
     fft_size,
     smoothing,
     min_db,
     max_db,
-    edge_threshold = 0.09,
+    edge_threshold,
     log_bins,
-  } = arguments.length > 0 && arguments[0] ? arguments[0] : {};
+  } = normalizeAudioMetricsOptions(arguments.length > 0 ? arguments[0] : {});
 
-  if (analyserNode) {
-    if (Number.isFinite(fft_size) && fft_size > 0) {
-      analyserNode.fftSize = fft_size;
-    }
-    if (Number.isFinite(smoothing)) {
-      analyserNode.smoothingTimeConstant = smoothing;
-    }
-    if (Number.isFinite(min_db)) {
-      analyserNode.minDecibels = min_db;
-    }
-    if (Number.isFinite(max_db)) {
-      analyserNode.maxDecibels = max_db;
-    }
-  }
+  syncAnalyserConfig({
+    fft_size,
+    smoothing,
+    min_db,
+    max_db,
+  });
 
   const metrics = computeAudioMetrics();
   if (include_scope && analyserNode) {
-    const scope = collectScopeData(analyserNode, edge_threshold);
-    metrics.scope = {
-      sample_rate: audioContext?.sampleRate ?? null,
-      fft_size: analyserNode.fftSize,
+    metrics.scope = collectScopePayload(analyserNode, {
       edge_threshold,
-      rising_edge_index: scope.rising_edge_index,
-      samples: scope.samples,
-    };
+      sample_rate: audioContext?.sampleRate ?? null,
+    });
   }
   if (include_spectrum && analyserNode) {
-    metrics.spectrum = collectSpectrumData(analyserNode, audioContext, log_bins);
+    metrics.spectrum = collectSpectrumPayload(analyserNode, audioContext, {
+      log_bins,
+    });
   }
 
   if ((include_scope || include_spectrum) && per_channel) {
@@ -885,20 +995,23 @@ async function getAudioMetrics() {
     if (channelAnalysers.length > 0) {
       if (include_scope && metrics.scope) {
         metrics.scope.channels = channelAnalysers.map((analyser, idx) => {
-          const scope = collectScopeData(analyser, edge_threshold);
           return {
             index: idx,
-            fft_size: analyser.fftSize,
-            edge_threshold,
-            rising_edge_index: scope.rising_edge_index,
-            samples: scope.samples,
+            ...collectScopePayload(analyser, {
+              edge_threshold,
+              sample_rate: audioContext?.sampleRate ?? null,
+            }),
           };
         });
       }
       if (include_spectrum && metrics.spectrum) {
         metrics.spectrum.channels = channelAnalysers.map((analyser, idx) => {
-          const spectrum = collectSpectrumData(analyser, audioContext, log_bins);
-          return { index: idx, ...spectrum };
+          return {
+            index: idx,
+            ...collectSpectrumPayload(analyser, audioContext, {
+              log_bins,
+            }),
+          };
         });
       }
     }
