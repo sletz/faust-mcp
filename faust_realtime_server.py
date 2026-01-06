@@ -8,7 +8,7 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 Tools:
   - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
   - check_syntax(faust_code, name?)
-  - get_audio_metrics(include_scope?, include_spectrum?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)
+  - get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)
   - get_params()
   - get_param(path)
   - get_param_values()
@@ -214,6 +214,7 @@ def get_param_values() -> str:
 def get_audio_metrics(
     include_scope: bool = False,
     include_spectrum: bool = False,
+    per_channel: bool = False,
     fft_size: int | None = None,
     smoothing: float | None = None,
     min_db: float | None = None,
@@ -226,6 +227,7 @@ def get_audio_metrics(
     params = {
         "include_scope": include_scope,
         "include_spectrum": include_spectrum,
+        "per_channel": per_channel,
         "fft_size": fft_size,
         "smoothing": smoothing,
         "min_db": min_db,

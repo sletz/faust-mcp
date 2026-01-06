@@ -63,6 +63,8 @@ let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParam
 let meterUnitsByPath = {};
 let meterProbesByPath = {};
 let analyserNode = null;
+let channelSplitter = null;
+let channelAnalysers = [];
 let uiServer = null;
 let dspName = null;
 let fileSourceNode = null;  // For file input playback
@@ -439,6 +441,29 @@ function collectSpectrumData(analyser, audioContext, logBins) {
   return spectrum;
 }
 
+function createAnalyserWithDefaults(audioContext) {
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = Math.pow(2, 11);
+  analyser.minDecibels = -96;
+  analyser.maxDecibels = 0;
+  analyser.smoothingTimeConstant = 0.85;
+  return analyser;
+}
+
+function ensureChannelAnalysers() {
+  if (!audioContext || !faustNode || channelAnalysers.length > 0) return;
+  const outputChannels = faustJson?.outputs ?? faustNode.numberOfOutputs ?? 0;
+  const channelCount = Math.max(1, outputChannels);
+  channelSplitter = audioContext.createChannelSplitter(channelCount);
+  faustNode.connect(channelSplitter);
+  channelAnalysers = Array.from({ length: channelCount }, () =>
+    createAnalyserWithDefaults(audioContext)
+  );
+  channelAnalysers.forEach((analyser, idx) => {
+    channelSplitter.connect(analyser, idx);
+  });
+}
+
 /**
  * Initialize the Faust compiler and WebAudio classes.
  * @returns {Promise<object>}
@@ -683,11 +708,7 @@ async function compileAndStart({
     });
   }
 
-  analyserNode = audioContext.createAnalyser();
-  analyserNode.fftSize = Math.pow(2, 11);
-  analyserNode.minDecibels = -96;
-  analyserNode.maxDecibels = 0;
-  analyserNode.smoothingTimeConstant = 0.85;
+  analyserNode = createAnalyserWithDefaults(audioContext);
   faustNode.connect(analyserNode);
   analyserNode.connect(audioContext.destination);
 
@@ -820,6 +841,7 @@ async function getAudioMetrics() {
   const {
     include_scope = false,
     include_spectrum = false,
+    per_channel = false,
     fft_size,
     smoothing,
     min_db,
@@ -856,6 +878,30 @@ async function getAudioMetrics() {
   }
   if (include_spectrum && analyserNode) {
     metrics.spectrum = collectSpectrumData(analyserNode, audioContext, log_bins);
+  }
+
+  if ((include_scope || include_spectrum) && per_channel) {
+    ensureChannelAnalysers();
+    if (channelAnalysers.length > 0) {
+      if (include_scope && metrics.scope) {
+        metrics.scope.channels = channelAnalysers.map((analyser, idx) => {
+          const scope = collectScopeData(analyser, edge_threshold);
+          return {
+            index: idx,
+            fft_size: analyser.fftSize,
+            edge_threshold,
+            rising_edge_index: scope.rising_edge_index,
+            samples: scope.samples,
+          };
+        });
+      }
+      if (include_spectrum && metrics.spectrum) {
+        metrics.spectrum.channels = channelAnalysers.map((analyser, idx) => {
+          const spectrum = collectSpectrumData(analyser, audioContext, log_bins);
+          return { index: idx, ...spectrum };
+        });
+      }
+    }
   }
   return metrics;
 }
@@ -912,6 +958,8 @@ async function stop() {
   faustNode = null;
   audioContext = null;
   analyserNode = null;
+  channelSplitter = null;
+  channelAnalysers = [];
   faustJson = null;
   paramsCache = [];
   outputParamsCache = {};

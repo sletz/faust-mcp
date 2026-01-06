@@ -52,6 +52,7 @@ help:
 	@printf "  rt-get-audio-metrics-scope Get time-domain scope samples\n"
 	@printf "  rt-get-audio-metrics-spectrum Get spectrum FFT bins\n"
 	@printf "  rt-get-audio-metrics-full Get scope + spectrum metrics\n"
+	@printf "  rt-get-audio-metrics-full-per-channel Get scope + spectrum per channel\n"
 	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
 	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
@@ -178,6 +179,9 @@ rt-get-audio-metrics-spectrum:
 
 rt-get-audio-metrics-full:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics --include-scope --include-spectrum
+
+rt-get-audio-metrics-full-per-channel:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_audio_metrics --include-scope --include-spectrum --per-channel
 
 rt-set-param:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool set_param --param-path $(RT_PARAM_PATH) --param-value $(RT_PARAM_VALUE)

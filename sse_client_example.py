@@ -23,6 +23,7 @@ async def main(
     hide_meters: bool,
     include_scope: bool,
     include_spectrum: bool,
+    per_channel: bool,
     fft_size: int | None,
     smoothing: float | None,
     min_db: float | None,
@@ -91,6 +92,8 @@ async def main(
                         args["include_scope"] = True
                     if include_spectrum:
                         args["include_spectrum"] = True
+                    if per_channel:
+                        args["per_channel"] = True
                     if fft_size is not None:
                         args["fft_size"] = fft_size
                     if smoothing is not None:
@@ -169,6 +172,11 @@ if __name__ == "__main__":
         help="Include spectrum FFT bins in get_audio_metrics.",
     )
     parser.add_argument(
+        "--per-channel",
+        action="store_true",
+        help="Return per-channel scope/spectrum in get_audio_metrics.",
+    )
+    parser.add_argument(
         "--fft-size",
         type=int,
         default=None,
@@ -241,6 +249,7 @@ if __name__ == "__main__":
         args.hide_meters,
         args.include_scope,
         args.include_spectrum,
+        args.per_channel,
         args.fft_size,
         args.smoothing,
         args.min_db,
