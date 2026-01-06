@@ -673,6 +673,32 @@ python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
 
 `tests/assets/sine.wav` is a mono 1 kHz test file included in this repo.
 
+### Full API test script
+
+The helper script `scripts/test_full_api.sh` runs all SSE tools in one go and
+optionally checks the UI HTTP server endpoints.
+
+```bash
+# Requires the real-time server to be running (see make run-rt-ui).
+scripts/test_full_api.sh
+```
+
+To skip UI checks (port 8787), use:
+
+```bash
+SKIP_UI=1 scripts/test_full_api.sh
+```
+
+You can override URLs and DSP selection with environment variables:
+
+```bash
+MCP_URL=http://127.0.0.1:8000/sse \
+MCP_HTTP_BASE=http://127.0.0.1:8000 \
+UI_HTTP_BASE=http://127.0.0.1:8787 \
+DSP=t2.dsp NAME=faust-rt \
+scripts/test_full_api.sh
+```
+
 ### stdio client
 
 ```bash

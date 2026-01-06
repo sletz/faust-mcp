@@ -13,1240 +13,883 @@
  */
 
 import { createInterface } from 'node:readline';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { Blob } from 'node:buffer';
 import path from 'node:path';
 import http from 'node:http';
 import fs from 'node:fs';
-
-// Base path to the node-web-audio-api checkout (default: submodule).
-const WEB_AUDIO_ROOT = process.env.WEBAUDIO_ROOT || 'external/node-web-audio-api';
-const UI_PORT = Number(process.env.FAUST_UI_PORT || 0);
-const UI_ROOT = process.env.FAUST_UI_ROOT || '';
-
-if (!globalThis.Blob) {
-  globalThis.Blob = Blob;
-}
-const MCP_ROOT = process.env.FAUST_MCP_ROOT || process.cwd();
-
-// Ensure native bindings are resolved relative to the node-web-audio-api checkout.
-// The native .node bindings are loaded by CJS and expect process.cwd() to match.
-try {
-  process.chdir(WEB_AUDIO_ROOT);
-} catch (err) {
-  throw new Error(`Failed to chdir to WEBAUDIO_ROOT: ${WEB_AUDIO_ROOT} (${err})`);
-}
-
-// Resolve all paths after chdir so relative roots work from anywhere.
-const resolvedRoot = path.resolve(process.cwd());
-const webAudioIndex = pathToFileURL(path.join(resolvedRoot, 'index.mjs')).href;
-const faustModuleEntry = pathToFileURL(
-  path.join(resolvedRoot, 'node_modules/@grame/faustwasm/dist/esm/index.js'),
-).href;
-const faustWasmRoot = path.join(resolvedRoot, 'node_modules/@grame/faustwasm');
-
-let AudioContext;
-let AudioWorkletNode;
-let instantiateFaustModuleFromFile;
-let LibFaust;
-let FaustCompiler;
-let FaustMonoDspGenerator;
-
-// Runtime state for the currently running DSP.
-let compiler = null;
-let audioContext = null;
-let faustNode = null;
-let faustJson = null;
-let paramsCache = [];
-let outputParamsCache = {};  // Bargraph values pushed by DSP via setOutputParamHandler
-let meterUnitsByPath = {};
-let meterProbesByPath = {};
-let analyserNode = null;
-let analyserDefaults = {
-  fft_size: Math.pow(2, 11),
-  min_db: -96,
-  max_db: 0,
-  smoothing: 0.85,
-};
-let channelSplitter = null;
-let channelAnalysers = [];
-let uiServer = null;
-let dspName = null;
-let fileSourceNode = null;  // For file input playback
+import {
+  extractBargraphProbes,
+  extractBargraphUnits,
+  extractParamsFromJson,
+  wrapTestInputs,
+} from './faust_dsp_utils.mjs';
+import {
+  applyAnalyserConfig,
+  collectScopePayload,
+  collectSpectrumPayload,
+  computeAudioMetrics,
+  normalizeAudioMetricsOptions,
+} from './metrics_utils.mjs';
 
 /**
- * Wrap DSP code with a generated test input signal when requested.
- * @param {string} dspCode
- * @param {string} inputSource
- * @param {number|undefined|null} inputFreq
- * @param {string|undefined|null} inputFile
- * @param {boolean} hideMeters
- * @returns {string}
+ * Immutable startup context (paths + env-configured settings).
  */
-function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideMeters) {
-  const source = (inputSource || 'none').trim().toLowerCase();
-  const hiddenTag = hideMeters ? '[hidden:1]' : '';
+class WorkerContext {
+  /**
+   * @param {NodeJS.ProcessEnv} env
+   */
+  constructor(env = process.env) {
+    const initialCwd = process.cwd();
+    this.mcpRoot = env.FAUST_MCP_ROOT || initialCwd;
+    this.webAudioRoot = env.WEBAUDIO_ROOT || 'external/node-web-audio-api';
+    this.uiPort = Number(env.FAUST_UI_PORT || 0);
+    this.uiRoot = env.FAUST_UI_ROOT || '';
 
-  // Shared meter definitions to keep wrapper variants in sync.
-  const buildMeteringDefs = (includeInputMeters) => {
-    const defs = [
-      '// Metering (Peak + RMS per channel)',
-      'mcp_lin2db(x) = ba.linear2db(max(x, 0.00001));',
-    ];
-    if (includeInputMeters) {
-      defs.push(
-        '// Input meters',
-        `mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
-        `mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
-        'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
-        'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
-      );
+    if (!globalThis.Blob) {
+      globalThis.Blob = Blob;
     }
-    defs.push(
-      '// Output meters',
-      `mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
-      `mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
-      'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
-      `mcp_out_mix_peak = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[2]Mix Peak${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
-      `mcp_out_mix_rms = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[3]Mix RMS${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
-      'mcp_out_mix_meter = mcp_out_mix_peak : mcp_out_mix_rms;',
-      'mcp_out_mix_signal(FX) = par(i, outputs(FX), _) :> _;',
-      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i)), (mcp_out_mix_signal(FX) : mcp_out_mix_meter);',  
-      '',
+
+    // Ensure native bindings are resolved relative to the node-web-audio-api checkout.
+    // The native .node bindings are loaded by CJS and expect process.cwd() to match.
+    try {
+      process.chdir(this.webAudioRoot);
+    } catch (err) {
+      throw new Error(`Failed to chdir to WEBAUDIO_ROOT: ${this.webAudioRoot} (${err})`);
+    }
+
+    // Resolve all paths after chdir so relative roots work from anywhere.
+    this.resolvedRoot = path.resolve(process.cwd());
+    this.webAudioIndex = pathToFileURL(path.join(this.resolvedRoot, 'index.mjs')).href;
+    this.faustModuleEntry = pathToFileURL(
+      path.join(this.resolvedRoot, 'node_modules/@grame/faustwasm/dist/esm/index.js'),
+    ).href;
+    this.faustWasmRoot = path.join(this.resolvedRoot, 'node_modules/@grame/faustwasm');
+  }
+}
+
+/**
+ * Lazy loader for the Faust compiler + WebAudio classes.
+ */
+class FaustCompilerManager {
+  /**
+   * @param {WorkerContext} context
+   */
+  constructor(context) {
+    this.context = context;
+    this.compiler = null;
+    this.AudioContext = null;
+    this.AudioWorkletNode = null;
+    this.FaustMonoDspGenerator = null;
+  }
+
+  /**
+   * Load compiler + WebAudio classes once and cache them.
+   * @returns {Promise<object>}
+   */
+  async ensureReady() {
+    if (this.compiler) return this.compiler;
+    ({ AudioContext: this.AudioContext, AudioWorkletNode: this.AudioWorkletNode } =
+      await import(this.context.webAudioIndex));
+    if (typeof globalThis.AudioWorkletNode === 'undefined') {
+      globalThis.AudioWorkletNode = this.AudioWorkletNode;
+    }
+
+    const {
+      instantiateFaustModuleFromFile,
+      LibFaust,
+      FaustCompiler,
+      FaustMonoDspGenerator,
+    } = await import(this.context.faustModuleEntry);
+
+    this.FaustMonoDspGenerator = FaustMonoDspGenerator;
+
+    const faustModule = await instantiateFaustModuleFromFile(
+      path.join(this.context.faustWasmRoot, 'libfaust-wasm/libfaust-wasm.js'),
+      path.join(this.context.faustWasmRoot, 'libfaust-wasm/libfaust-wasm.data'),
+      path.join(this.context.faustWasmRoot, 'libfaust-wasm/libfaust-wasm.wasm'),
     );
-    return defs;
-  };
-  if (source === 'none') {
-    const indented = String(dspCode)
-      .split('\n')
-      .map((line) => (line.trim() ? `  ${line}` : line))
-      .join('\n');
 
-    const meteringDefs = buildMeteringDefs(false);
-
-    const wrappedCode = [
-      'import("stdfaust.lib");',
-      '',
-      ...meteringDefs,
-      '// User DSP',
-      'mcp_dsp = environment {',
-      indented,
-      '};',
-      'process = mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);',
-    ].join('\n');
-
-    return { code: wrappedCode, useExternalInput: false };
-  }
-  if (source !== 'sine' && source !== 'noise' && source !== 'file') {
-    throw new Error(`Unsupported input_source: ${inputSource}`);
+    const libFaust = new LibFaust(faustModule);
+    this.compiler = new FaustCompiler(libFaust);
+    return this.compiler;
   }
 
-  // For file input, check if it's HTTP URL or local file
-  if (source === 'file') {
-    if (!inputFile) {
-      throw new Error('input_file is required for input_source=file');
+  /**
+   * Create a Faust DSP generator for the current compiler.
+   * @returns {object}
+   */
+  createGenerator() {
+    if (!this.FaustMonoDspGenerator) {
+      throw new Error('Faust compiler is not initialized yet');
     }
+    return new this.FaustMonoDspGenerator();
+  }
 
-    const indented = String(dspCode)
-      .split('\n')
-      .map((line) => (line.trim() ? `  ${line}` : line))
-      .join('\n');
-
-    // Adaptive metering for N inputs/outputs
-    const meteringDefs = buildMeteringDefs(true);
-
-    // HTTP/HTTPS URLs: use FAUST soundfile (works with fetch)
-    if (inputFile.startsWith('http://') || inputFile.startsWith('https://')) {
-      const escaped = String(inputFile).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-      const wrappedCode = [
-        'import("stdfaust.lib");',
-        '',
-        ...meteringDefs,
-        'mcp_so = library("soundfiles.lib");',
-        `mcp_sf = soundfile("sound[url:{'${escaped}'}]", 1);`,
-        'mcp_loop_test = mcp_so.loop(mcp_sf, 0);',
-        'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig) : FX;',
-        'mcp_dsp = environment {',
-        indented,
-        '};',
-        'process = mcp_addTestInputs(mcp_dsp.process, mcp_loop_test) <: mcp_output_meters(mcp_dsp.process);',
-      ].join('\n');
-
-      return { code: wrappedCode, useExternalInput: false };
+  /**
+   * Compile DSP code to validate syntax without starting audio.
+   * @param {{dsp_code: string, name?: string, args?: string}} params
+   * @returns {Promise<object>}
+   */
+  async checkSyntax({ dsp_code, name, args }) {
+    await this.ensureReady();
+    if (!dsp_code) {
+      return { status: 'error', error: 'Missing dsp_code' };
     }
-
-    // Local files: use AudioBufferSourceNode (fetch doesn't support file://)
-    // Wrap DSP with input + output metering (file source connects externally to Faust node input)
-    const wrappedCode = [
-      'import("stdfaust.lib");',
-      '',
-      ...meteringDefs,
-      '// User DSP',
-      'mcp_dsp = environment {',
-      indented,
-      '};',
-      'process = mcp_input_meters(mcp_dsp.process) : mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);',
-    ].join('\n');
-
-    return { code: wrappedCode, useExternalInput: true, inputFile };
+    const dspName = name || 'faust-check';
+    const compilerArgs = args || '-ftz 2';
+    try {
+      const factory = await this.compiler.createMonoDSPFactory(
+        dspName,
+        dsp_code,
+        compilerArgs,
+      );
+      const json = factory?.json ? JSON.parse(factory.json) : null;
+      return { status: 'ok', name: json?.name || dspName, json };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const detail = this.compiler?.getErrorMessage?.() || '';
+      const error = detail && detail !== message ? `${message}\n${detail}` : message;
+      return { status: 'error', error };
+    }
   }
-
-  // For sine/noise, wrap the DSP with test signal generator
-  let signal;
-  if (source === 'sine') {
-    const freq = Number.isFinite(inputFreq) ? inputFreq : 1000;
-    signal = `library("oscillators.lib").osc(${freq})`;
-  } else {
-    signal = 'library("noises.lib").noise';
-  }
-
-  const indented = String(dspCode)
-    .split('\n')
-    .map((line) => (line.trim() ? `  ${line}` : line))
-    .join('\n');
-
-  // Adaptive metering for N inputs/outputs
-  const meteringDefs = buildMeteringDefs(true);
-
-  const wrappedCode = [
-    'import("stdfaust.lib");',
-    '',
-    ...meteringDefs,
-    '// User DSP',
-    'mcp_addTestInputs(FX, sig) = par(i, inputs(FX), sig);',
-    'mcp_dsp = environment {',
-    indented,
-    '};',
-    `process = mcp_addTestInputs(mcp_dsp.process, ${signal}) : mcp_input_meters(mcp_dsp.process) : mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);`,
-  ].join('\n');
-
-  return { code: wrappedCode, useExternalInput: false };
 }
+
 
 /**
- * Convert dB values back to linear amplitude.
- * @param {number} db
- * @returns {number}
+ * Collects bargraph metrics plus optional scope/spectrum payloads.
  */
-function dbToLinear(db) {
-  if (!Number.isFinite(db)) return NaN;
-  return Math.pow(10, db / 20);
-}
-
-/**
- * Normalize a Faust UI path by stripping UI layout prefixes and ordering tags.
- * @param {string} path
- * @returns {string}
- */
-function normalizeMeterPath(path) {
-  return path
-    .replace(/^\/[^/]+\//, "")
-    .replace(/v:/g, "")
-    .replace(/\/\[\d+\]/g, "")
-    .replace(/_/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/ch\s*(\d+)/g, "ch$1")
-    .trim();
-}
-
-/**
- * Compute output metering (RMS/Peak) from cached bargraph values.
- * @returns {{ input: { channels: Array<{ rms: number|null, peak: number|null }> }, output: { mix: { rms: number, peak: number, hasNaN: boolean }, channels: Array<{ rms: number|null, peak: number|null }> }, probes: Array<{ id: number, value: number }> }}
- */
-function computeAudioMetrics() {
-  const inputPeakRegex = /Input Meters\/Peak ch(\d+)/;
-  const inputRmsRegex = /Input Meters\/RMS ch(\d+)/;
-  const peakRegex = /Output Meters\/Peak ch(\d+)/;
-  const rmsRegex = /Output Meters\/RMS ch(\d+)/;
-  const mixPeakRegex = /Output Meters\/Mix Peak/;
-  const mixRmsRegex = /Output Meters\/Mix RMS/;
-  const inputChannels = [];
-  const outputChannels = [];
-  const probes = {};
-  let hasNaN = false;
-  let mixRms = null;
-  let mixPeak = null;
-
-  const applyChannelValue = (channels, idx, isPeak, value, includeNaNFlag) => {
-    if (!channels[idx]) {
-      channels[idx] = includeNaNFlag
-        ? { rms: null, peak: null, hasNaN: false }
-        : { rms: null, peak: null };
-    }
-    if (isPeak) {
-      channels[idx].peak = value;
-    } else {
-      channels[idx].rms = value;
-    }
-  };
-
-  const applyOutputChannelValue = (idx, isPeak, value) => {
-    applyChannelValue(outputChannels, idx, isPeak, value, true);
-    if (Number.isNaN(value)) {
-      outputChannels[idx].hasNaN = true;
-    }
-  };
-
-  for (const [path, value] of Object.entries(outputParamsCache)) {
-    const normalizedPath = normalizeMeterPath(path);
-    const unit = meterUnitsByPath[path] ?? null;
-    const mappedValue = unit === 'dB' ? dbToLinear(value) : value;
-    const probeId = meterProbesByPath[path];
-    if (Number.isFinite(probeId)) {
-      probes[probeId] = mappedValue;
-    }
-    const inputPeakMatch = normalizedPath.match(inputPeakRegex);
-    const inputRmsMatch = normalizedPath.match(inputRmsRegex);
-    if (inputPeakMatch || inputRmsMatch) {
-      const idx = parseInt((inputPeakMatch || inputRmsMatch)[1], 10);
-      if (!Number.isFinite(idx)) continue;
-      applyChannelValue(inputChannels, idx, !!inputPeakMatch, mappedValue, false);
-      if (Number.isNaN(mappedValue)) hasNaN = true;
-      continue;
-    }
-    if (mixPeakRegex.test(normalizedPath)) {
-      const peak = mappedValue;
-      mixPeak = peak;
-      if (Number.isNaN(peak)) hasNaN = true;
-      continue;
-    }
-    if (mixRmsRegex.test(normalizedPath)) {
-      const rms = mappedValue;
-      mixRms = rms;
-      if (Number.isNaN(rms)) hasNaN = true;
-      continue;
-    }
-    const peakMatch = normalizedPath.match(peakRegex);
-    const rmsMatch = normalizedPath.match(rmsRegex);
-    if (!peakMatch && !rmsMatch) continue;
-    const idx = parseInt((peakMatch || rmsMatch)[1], 10);
-    if (!Number.isFinite(idx)) continue;
-    if (peakMatch) {
-      applyOutputChannelValue(idx, true, mappedValue);
-      if (Number.isNaN(mappedValue)) hasNaN = true;
-    }
-    if (rmsMatch) {
-      applyOutputChannelValue(idx, false, mappedValue);
-      if (Number.isNaN(mappedValue)) hasNaN = true;
-    }
+class MetricsCollector {
+  /**
+   * Initialize analyser state + caches.
+   */
+  constructor() {
+    this.audioContext = null;
+    this.faustNode = null;
+    this.faustJson = null;
+    this.outputParamsCache = null;
+    this.meterUnitsByPath = null;
+    this.meterProbesByPath = null;
+    this.analyserNode = null;
+    this.channelSplitter = null;
+    this.channelAnalysers = [];
+    this.analyserDefaults = {
+      fft_size: Math.pow(2, 11),
+      min_db: -96,
+      max_db: 0,
+      smoothing: 0.85,
+    };
   }
 
-  const definedInputChannels = inputChannels.filter(Boolean);
-  const definedOutputChannels = outputChannels.filter(Boolean);
-
-  const resolvedMixRms = mixRms ?? 0;
-  const resolvedMixPeak = mixPeak ?? 0;
-  const probeEntries = Object.entries(probes)
-    .map(([id, value]) => ({ id: Number(id), value }))
-    .sort((a, b) => a.id - b.id);
-
-  return {
-    input: {
-      channels: definedInputChannels,
-    },
-    output: {
-      mix: {
-        rms: resolvedMixRms,
-        peak: resolvedMixPeak,
-        hasNaN,
-      },
-      channels: definedOutputChannels,
-    },
-    probes: probeEntries,
-  };
-}
-
-function collectScopeData(analyser, edgeThreshold) {
-  const sampleCount = analyser.frequencyBinCount;
-  const timeData = new Float32Array(sampleCount);
-  analyser.getFloatTimeDomainData(timeData);
-
-  let risingEdge = 0;
-  while (
-    timeData[risingEdge] > 0 &&
-    risingEdge < timeData.length
-  ) {
-    risingEdge++;
+  /**
+   * Bind bargraph caches for metrics conversion.
+   * @param {object} params
+   */
+  setMeterCaches({ outputParamsCache, meterUnitsByPath, meterProbesByPath }) {
+    this.outputParamsCache = outputParamsCache;
+    this.meterUnitsByPath = meterUnitsByPath;
+    this.meterProbesByPath = meterProbesByPath;
   }
 
-  if (risingEdge >= timeData.length) risingEdge = 0;
-
-  while (
-    timeData[risingEdge] < edgeThreshold &&
-    risingEdge < timeData.length
-  ) {
-    risingEdge++;
+  /**
+   * Attach to the current audio graph and JSON metadata.
+   * @param {AudioContext} audioContext
+   * @param {object} faustNode
+   * @param {object} faustJson
+   */
+  attach(audioContext, faustNode, faustJson) {
+    this.audioContext = audioContext;
+    this.faustNode = faustNode;
+    this.faustJson = faustJson;
+    this.analyserNode = this.createAnalyserWithDefaults();
+    this.faustNode.connect(this.analyserNode);
+    this.analyserNode.connect(this.audioContext.destination);
   }
 
-  if (risingEdge >= timeData.length) risingEdge = 0;
-
-  const samples = new Array(timeData.length);
-  for (let i = 0; i < timeData.length; i++) {
-    samples[i] = timeData[(risingEdge + i) % timeData.length];
-  }
-
-  return { samples, rising_edge_index: risingEdge };
-}
-
-function collectSpectrumData(analyser, audioContext, logBins) {
-  const binCount = analyser.frequencyBinCount;
-  const freqData = new Float32Array(binCount);
-  const freqs = new Array(binCount);
-  const fftSize = analyser.fftSize;
-  const sampleRate = audioContext?.sampleRate ?? 44100;
-
-  if (typeof analyser.getFloatFrequencyData === 'function') {
-    analyser.getFloatFrequencyData(freqData);
-  } else {
-    const byteData = new Uint8Array(binCount);
-    analyser.getByteFrequencyData(byteData);
-    for (let i = 0; i < binCount; i++) {
-      freqData[i] = (byteData[i] / 255) * (analyser.maxDecibels - analyser.minDecibels) + analyser.minDecibels;
+  /**
+   * Disconnect analysers and clear cached references.
+   */
+  reset() {
+    this.audioContext = null;
+    this.faustNode = null;
+    this.faustJson = null;
+    this.outputParamsCache = null;
+    this.meterUnitsByPath = null;
+    this.meterProbesByPath = null;
+    if (this.analyserNode) {
+      try {
+        this.analyserNode.disconnect();
+      } catch (_) {}
     }
-  }
-
-  for (let i = 0; i < binCount; i++) {
-    freqs[i] = (i * sampleRate) / fftSize;
-  }
-
-  const spectrum = {
-    fft_size: fftSize,
-    min_db: analyser.minDecibels,
-    max_db: analyser.maxDecibels,
-    smoothing: analyser.smoothingTimeConstant,
-    bins_db: Array.from(freqData),
-    freqs_hz: freqs,
-  };
-
-  if (Number.isFinite(logBins) && logBins > 0) {
-    const logBinCount = Math.floor(logBins);
-    const logBinsDb = new Array(logBinCount).fill(-Infinity);
-    const logFreqs = new Array(logBinCount).fill(0);
-    const minFreq = 20;
-    const maxFreq = sampleRate / 2;
-    for (let i = 0; i < logBinCount; i++) {
-      const t0 = i / logBinCount;
-      const t1 = (i + 1) / logBinCount;
-      const f0 = minFreq * Math.pow(maxFreq / minFreq, t0);
-      const f1 = minFreq * Math.pow(maxFreq / minFreq, t1);
-      logFreqs[i] = Math.sqrt(f0 * f1);
-      const start = Math.max(0, Math.floor((f0 / maxFreq) * binCount));
-      const end = Math.min(binCount - 1, Math.ceil((f1 / maxFreq) * binCount));
-      let maxVal = -Infinity;
-      for (let b = start; b <= end; b++) {
-        if (freqData[b] > maxVal) maxVal = freqData[b];
-      }
-      logBinsDb[i] = maxVal;
+    if (this.channelSplitter) {
+      try {
+        this.channelSplitter.disconnect();
+      } catch (_) {}
     }
-    spectrum.log_bins_db = logBinsDb;
-    spectrum.log_freqs_hz = logFreqs;
+    this.channelAnalysers.forEach((analyser) => {
+      try {
+        analyser.disconnect();
+      } catch (_) {}
+    });
+    this.analyserNode = null;
+    this.channelSplitter = null;
+    this.channelAnalysers = [];
   }
 
-  return spectrum;
-}
-
-/**
- * Build scope payload for get_audio_metrics (including samples + metadata).
- * @param {AnalyserNode} analyser
- * @param {object} opts
- * @returns {object}
- */
-function collectScopePayload(analyser, {
-  edge_threshold,
-  sample_rate,
-} = {}) {
-  const scope = collectScopeData(analyser, edge_threshold);
-  return {
-    sample_rate,
-    fft_size: analyser.fftSize,
-    edge_threshold,
-    rising_edge_index: scope.rising_edge_index,
-    samples: scope.samples,
-  };
-}
-
-/**
- * Build spectrum payload for get_audio_metrics (including bins + metadata).
- * @param {AnalyserNode} analyser
- * @param {AudioContext|null} audioContext
- * @param {object} opts
- * @returns {object}
- */
-function collectSpectrumPayload(analyser, audioContext, {
-  log_bins,
-} = {}) {
-  return collectSpectrumData(analyser, audioContext, log_bins);
-}
-
-function createAnalyserWithDefaults(audioContext) {
-  const analyser = audioContext.createAnalyser();
-  applyAnalyserConfig(analyser, analyserDefaults);
-  return analyser;
-}
-
-/**
- * Apply analyser configuration overrides (FFT size, dB range, smoothing).
- * @param {AnalyserNode|null} analyser
- * @param {object} opts
- */
-function applyAnalyserConfig(analyser, {
-  fft_size,
-  smoothing,
-  min_db,
-  max_db,
-} = {}) {
-  if (!analyser) return;
-  if (Number.isFinite(fft_size) && fft_size > 0) {
-    analyser.fftSize = fft_size;
-  }
-  if (Number.isFinite(smoothing)) {
-    analyser.smoothingTimeConstant = smoothing;
-  }
-  if (Number.isFinite(min_db)) {
-    analyser.minDecibels = min_db;
-  }
-  if (Number.isFinite(max_db)) {
-    analyser.maxDecibels = max_db;
-  }
-}
-
-/**
- * Sync analyser configuration across global + per-channel analysers.
- * @param {object} opts
- */
-function syncAnalyserConfig(opts = {}) {
-  applyAnalyserConfig(analyserNode, opts);
-  channelAnalysers.forEach((analyser) => applyAnalyserConfig(analyser, opts));
-  analyserDefaults = {
-    fft_size: opts.fft_size ?? analyserDefaults.fft_size,
-    min_db: opts.min_db ?? analyserDefaults.min_db,
-    max_db: opts.max_db ?? analyserDefaults.max_db,
-    smoothing: opts.smoothing ?? analyserDefaults.smoothing,
-  };
-}
-
-/**
- * Normalize get_audio_metrics options with defaults.
- * @param {object} opts
- * @returns {object}
- */
-function normalizeAudioMetricsOptions(opts = {}) {
-  const {
-    include_scope = false,
-    include_spectrum = false,
-    per_channel = false,
-    fft_size,
-    smoothing,
-    min_db,
-    max_db,
-    edge_threshold = 0.09,
-    log_bins,
-  } = opts;
-  return {
-    include_scope,
-    include_spectrum,
-    per_channel,
-    fft_size,
-    smoothing,
-    min_db,
-    max_db,
-    edge_threshold,
-    log_bins,
-  };
-}
-
-function ensureChannelAnalysers() {
-  if (!audioContext || !faustNode || channelAnalysers.length > 0) return;
-  const outputChannels = faustJson?.outputs ?? faustNode.numberOfOutputs ?? 0;
-  const channelCount = Math.max(1, outputChannels);
-  channelSplitter = audioContext.createChannelSplitter(channelCount);
-  faustNode.connect(channelSplitter);
-  channelAnalysers = Array.from({ length: channelCount }, () => {
-    const analyser = createAnalyserWithDefaults(audioContext);
-    applyAnalyserConfig(analyser, analyserDefaults);
+  /**
+   * Create a configured analyser node.
+   * @returns {AnalyserNode}
+   */
+  createAnalyserWithDefaults() {
+    const analyser = this.audioContext.createAnalyser();
+    applyAnalyserConfig(analyser, this.analyserDefaults);
     return analyser;
-  });
-  channelAnalysers.forEach((analyser, idx) => {
-    channelSplitter.connect(analyser, idx);
-  });
-}
-
-/**
- * Initialize the Faust compiler and WebAudio classes.
- * @returns {Promise<object>}
- */
-async function initFaust() {
-  // Lazy init for libfaust + compiler.
-  if (compiler) return compiler;
-  ({ AudioContext, AudioWorkletNode } = await import(webAudioIndex));
-  if (typeof globalThis.AudioWorkletNode === 'undefined') {
-    globalThis.AudioWorkletNode = AudioWorkletNode;
   }
 
-  ({
-    instantiateFaustModuleFromFile,
-    LibFaust,
-    FaustCompiler,
-    FaustMonoDspGenerator,
-  } = await import(faustModuleEntry));
-
-  // Load the Faust compiler wasm bundle from @grame/faustwasm.
-  const faustModule = await instantiateFaustModuleFromFile(
-    path.join(faustWasmRoot, 'libfaust-wasm/libfaust-wasm.js'),
-    path.join(faustWasmRoot, 'libfaust-wasm/libfaust-wasm.data'),
-    path.join(faustWasmRoot, 'libfaust-wasm/libfaust-wasm.wasm'),
-  );
-
-  const libFaust = new LibFaust(faustModule);
-  compiler = new FaustCompiler(libFaust);
-  return compiler;
-}
-
-/**
- * Normalize Faust metadata array into a flat key/value map.
- * @param {Array<object>|undefined|null} meta
- * @returns {Record<string, string>}
- */
-function metaToObject(meta) {
-  // Convert Faust meta array into a flat object.
-  const out = {};
-  if (!Array.isArray(meta)) return out;
-  for (const entry of meta) {
-    if (entry && typeof entry === 'object') {
-      for (const [key, value] of Object.entries(entry)) {
-        out[key] = value;
-      }
+  /**
+   * Apply analyser settings to all active analysers.
+   * @param {object} opts
+   */
+  syncAnalyserConfig(opts = {}) {
+    if (this.analyserNode) {
+      applyAnalyserConfig(this.analyserNode, opts);
     }
+    this.channelAnalysers.forEach((analyser) => applyAnalyserConfig(analyser, opts));
+    this.analyserDefaults = {
+      fft_size: opts.fft_size ?? this.analyserDefaults.fft_size,
+      min_db: opts.min_db ?? this.analyserDefaults.min_db,
+      max_db: opts.max_db ?? this.analyserDefaults.max_db,
+      smoothing: opts.smoothing ?? this.analyserDefaults.smoothing,
+    };
   }
-  return out;
-}
 
-/**
- * Walk the Faust UI tree and append parameter descriptors.
- * @param {Array<object>|undefined|null} items
- * @param {Array<object>} acc
- */
-function collectParams(items, acc) {
-  // Recursively traverse UI items and collect control descriptors.
-  for (const item of items || []) {
-    if (!item || typeof item !== 'object') continue;
-    if (item.items) {
-      collectParams(item.items, acc);
-      continue;
-    }
-
-    const type = item.type;
-    const isControl = [
-      'hslider',
-      'vslider',
-      'nentry',
-      'button',
-      'checkbox',
-    ].includes(type);
-    if (!isControl) continue;
-
-    const meta = metaToObject(item.meta);
-    acc.push({
-      path: item.address,
-      shortname: item.shortname,
-      label: item.label,
-      type,
-      init: item.init,
-      min: item.min,
-      max: item.max,
-      step: item.step,
-      unit: meta.unit ?? null,
-      meta,
+  /**
+   * Create per-channel analysers when needed.
+   */
+  ensureChannelAnalysers() {
+    if (!this.audioContext || !this.faustNode || this.channelAnalysers.length > 0) return;
+    const outputChannels = this.faustJson?.outputs ?? this.faustNode.numberOfOutputs ?? 0;
+    const channelCount = Math.max(1, outputChannels);
+    this.channelSplitter = this.audioContext.createChannelSplitter(channelCount);
+    this.faustNode.connect(this.channelSplitter);
+    this.channelAnalysers = Array.from({ length: channelCount }, () => {
+      const analyser = this.createAnalyserWithDefaults();
+      applyAnalyserConfig(analyser, this.analyserDefaults);
+      return analyser;
+    });
+    this.channelAnalysers.forEach((analyser, idx) => {
+      this.channelSplitter.connect(analyser, idx);
     });
   }
-}
 
-function collectBargraphMeta(items, acc, metaKey, mapValue) {
-  // Recursively traverse UI items and collect bargraph metadata by address.
-  for (const item of items || []) {
-    if (!item || typeof item !== 'object') continue;
-    if (item.items) {
-      collectBargraphMeta(item.items, acc, metaKey, mapValue);
-      continue;
+  /**
+   * Collect meters plus optional scope/spectrum payloads.
+   * @param {object} options
+   * @returns {object}
+   */
+  getMetrics(options) {
+    const {
+      include_scope,
+      include_spectrum,
+      per_channel,
+      fft_size,
+      smoothing,
+      min_db,
+      max_db,
+      edge_threshold,
+      log_bins,
+    } = normalizeAudioMetricsOptions(options);
+
+    this.syncAnalyserConfig({
+      fft_size,
+      smoothing,
+      min_db,
+      max_db,
+    });
+
+    const metrics = computeAudioMetrics(
+      this.outputParamsCache ?? {},
+      this.meterUnitsByPath ?? {},
+      this.meterProbesByPath ?? {},
+    );
+
+    if (include_scope && this.analyserNode) {
+      metrics.scope = collectScopePayload(this.analyserNode, {
+        edge_threshold,
+        sample_rate: this.audioContext?.sampleRate ?? null,
+      });
+    }
+    if (include_spectrum && this.analyserNode) {
+      metrics.spectrum = collectSpectrumPayload(this.analyserNode, this.audioContext, {
+        log_bins,
+      });
     }
 
-    const type = item.type;
-    const isBargraph = ['hbargraph', 'vbargraph'].includes(type);
-    if (!isBargraph) continue;
-
-    const meta = metaToObject(item.meta);
-    if (typeof item.address !== 'string') continue;
-    if (!(metaKey in meta)) continue;
-    const mapped = mapValue(meta[metaKey]);
-    if (mapped === undefined) continue;
-    acc[item.address] = mapped;
-  }
-}
-
-/**
- * Extract parameter descriptors from a Faust JSON object.
- * @param {object|undefined|null} jsonObj
- * @returns {Array<object>}
- */
-function extractParamsFromJson(jsonObj) {
-  const params = [];
-  collectParams(jsonObj?.ui || [], params);
-  return params;
-}
-
-/**
- * Extract bargraph units (by address) from a Faust JSON object.
- * @param {object|undefined|null} jsonObj
- * @returns {Object<string, string|null>}
- */
-function extractBargraphUnits(jsonObj) {
-  const units = {};
-  collectBargraphMeta(jsonObj?.ui || [], units, 'unit', (value) => value ?? null);
-  return units;
-}
-
-/**
- * Extract bargraph probes (by address) from a Faust JSON object.
- * @param {object|undefined|null} jsonObj
- * @returns {Object<string, number>}
- */
-function extractBargraphProbes(jsonObj) {
-  const probes = {};
-  collectBargraphMeta(jsonObj?.ui || [], probes, 'probe', (value) => {
-    const probeId = Number.parseInt(value, 10);
-    return Number.isFinite(probeId) ? probeId : undefined;
-  });
-  return probes;
-}
-
-/**
- * Compile DSP code to validate syntax without starting audio.
- * @param {{dsp_code: string, name?: string, args?: string}} params
- * @returns {Promise<object>}
- */
-async function checkSyntax({ dsp_code, name, args }) {
-  // Compile DSP to validate syntax without starting audio.
-  await initFaust();
-  if (!dsp_code) {
-    return { status: 'error', error: 'Missing dsp_code' };
-  }
-  const dspName = name || 'faust-check';
-  const compilerArgs = args || '-ftz 2';
-  try {
-    const factory = await compiler.createMonoDSPFactory(
-      dspName,
-      dsp_code,
-      compilerArgs,
-    );
-    const json = factory?.json ? JSON.parse(factory.json) : null;
-    return { status: 'ok', name: json?.name || dspName, json };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const detail = compiler?.getErrorMessage?.() || '';
-    const error = detail && detail !== message ? `${message}\n${detail}` : message;
-    return { status: 'error', error };
-  }
-}
-
-/**
- * Compile DSP code, start playback, and return UI/param metadata.
- * @param {object} params
- * @returns {Promise<object>}
- */
-async function compileAndStart({
-  dsp_code,
-  name,
-  latency_hint,
-  input_source,
-  input_freq,
-  input_file,
-  hide_meters,
-}) {
-  // Compile DSP, create AudioWorklet node, connect, and start.
-  await initFaust();
-
-  if (audioContext) {
-    // Replace the running DSP.
-    try {
-      if (fileSourceNode) {
-        fileSourceNode.stop();
-        fileSourceNode = null;
+    if ((include_scope || include_spectrum) && per_channel) {
+      this.ensureChannelAnalysers();
+      if (this.channelAnalysers.length > 0) {
+        if (include_scope && metrics.scope) {
+          metrics.scope.channels = this.channelAnalysers.map((analyser, idx) => {
+            return {
+              index: idx,
+              ...collectScopePayload(analyser, {
+                edge_threshold,
+                sample_rate: this.audioContext?.sampleRate ?? null,
+              }),
+            };
+          });
+        }
+        if (include_spectrum && metrics.spectrum) {
+          metrics.spectrum.channels = this.channelAnalysers.map((analyser, idx) => {
+            return {
+              index: idx,
+              ...collectSpectrumPayload(analyser, this.audioContext, {
+                log_bins,
+              }),
+            };
+          });
+        }
       }
-    } catch (_) {}
-    try {
-      if (faustNode) {
-        faustNode.stop();
-      }
-    } catch (_) {}
-    try {
-      await audioContext.close();
-    } catch (_) {}
-    audioContext = null;
-    faustNode = null;
+    }
+
+    return metrics;
+  }
+}
+
+/**
+ * Owns DSP lifecycle and runtime state for a single active graph.
+ */
+class WorkerRuntime {
+  /**
+   * @param {{compilerManager: FaustCompilerManager}} params
+   */
+  constructor({ compilerManager }) {
+    this.compilerManager = compilerManager;
+    this.metricsCollector = new MetricsCollector();
+    this.resetState();
   }
 
-  const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
-  audioContext = new AudioContext({ latencyHint: hint });
+  /**
+   * Reset runtime state and clear cached metering data.
+   */
+  resetState() {
+    this.audioContext = null;
+    this.faustNode = null;
+    this.faustJson = null;
+    this.paramsCache = [];
+    this.outputParamsCache = {};
+    this.meterUnitsByPath = {};
+    this.meterProbesByPath = {};
+    this.dspName = null;
+    this.fileSourceNode = null;
+    this.metricsCollector.reset();
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
+    });
+  }
 
-  const generator = new FaustMonoDspGenerator();
-  const wrapped = wrapTestInputs(
+  /**
+   * Guard to ensure a DSP is running before control operations.
+   */
+  ensureRunning() {
+    if (!this.faustNode) {
+      throw new Error('No running DSP. Call compile_and_start first.');
+    }
+  }
+
+  /**
+   * Return parameter paths for the current DSP.
+   * @returns {string[]}
+   */
+  getParamPaths() {
+    return this.faustNode.getParams?.() ?? this.paramsCache.map((p) => p.path);
+  }
+
+  /**
+   * Compile DSP code and start audio rendering.
+   * @param {object} params
+   * @returns {Promise<object>}
+   */
+  async compileAndStart({
     dsp_code,
+    name,
+    latency_hint,
     input_source,
     input_freq,
     input_file,
     hide_meters,
-  );
-  const compiled = await generator.compile(compiler, name, wrapped.code, '-ftz 2');
-  if (!compiled) {
-    throw new Error('Faust compilation failed');
-  }
+  }) {
+    await this.compilerManager.ensureReady();
 
-  faustNode = await generator.createNode(audioContext);
-  if (!faustNode) {
-    throw new Error('Failed to create Faust node');
-  }
-
-  // Register handler for output parameters (bargraphs)
-  // DSP pushes values here instead of polling
-  outputParamsCache = {};
-  if (typeof faustNode.setOutputParamHandler === 'function') {
-    faustNode.setOutputParamHandler((path, value) => {
-      outputParamsCache[path] = value;
-    });
-  }
-
-  analyserNode = createAnalyserWithDefaults(audioContext);
-  faustNode.connect(analyserNode);
-  analyserNode.connect(audioContext.destination);
-
-  // Handle file input: load audio file and connect to FAUST input
-  if (wrapped.useExternalInput && wrapped.inputFile) {
-    try {
-      // Read audio file
-      const fileBuffer = fs.readFileSync(wrapped.inputFile);
-      const arrayBuffer = fileBuffer.buffer.slice(
-        fileBuffer.byteOffset,
-        fileBuffer.byteOffset + fileBuffer.byteLength
-      );
-
-      // Decode audio data
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-      // Create looping source node
-      fileSourceNode = audioContext.createBufferSource();
-      fileSourceNode.buffer = audioBuffer;
-      fileSourceNode.loop = true;
-
-      // Connect file source -> FAUST effect -> destination
-      fileSourceNode.connect(faustNode);
-      fileSourceNode.start();
-
-      console.error(`Loaded audio file: ${wrapped.inputFile} (${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.sampleRate}Hz)`);
-    } catch (err) {
-      throw new Error(`Failed to load audio file: ${err.message}`);
+    if (this.audioContext) {
+      await this.stop();
     }
-  }
+    this.paramsCache = [];
+    this.meterUnitsByPath = {};
+    this.meterProbesByPath = {};
+    this.faustJson = null;
+    this.dspName = null;
 
-  faustNode.start();
+    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
+    const AudioContext = this.compilerManager.AudioContext;
+    this.audioContext = new AudioContext({ latencyHint: hint });
 
-  // Extract UI metadata and parameter paths from Faust JSON.
-  const jsonStr = faustNode.getJSON();
-  faustJson = JSON.parse(jsonStr);
-  dspName = faustJson?.name || name || null;
-  paramsCache = extractParamsFromJson(faustJson);
-  meterUnitsByPath = extractBargraphUnits(faustJson);
-  meterProbesByPath = extractBargraphProbes(faustJson);
-
-  const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
-
-  return {
-    status: 'started',
-    name,
-    latency_hint: hint,
-    inputs: faustJson.inputs ?? null,
-    outputs: faustJson.outputs ?? null,
-    params: paramsCache,
-    param_paths: paramPaths,
-    faust_json: faustJson,
-  };
-}
-
-/**
- * Guard helper to ensure a DSP is running before control operations.
- */
-function ensureRunning() {
-  // Guard to ensure a DSP is started before control operations.
-  if (!faustNode) {
-    throw new Error('No running DSP. Call compile_and_start first.');
-  }
-}
-
-/**
- * Set a parameter value on the running DSP.
- * @param {{path: string, value: number}} params
- * @returns {Promise<object>}
- */
-async function setParam({ path, value }) {
-  // Update a parameter on the running DSP.
-  ensureRunning();
-  faustNode.setParamValue(path, value);
-  const current = faustNode.getParamValue(path);
-  return { status: 'ok', path, value: current };
-}
-
-/**
- * Get the current value of a parameter on the running DSP.
- * @param {{path: string}} params
- * @returns {Promise<object>}
- */
-async function getParam({ path }) {
-  ensureRunning();
-  const current = faustNode.getParamValue(path);
-  return { status: 'ok', path, value: current };
-}
-
-/**
- * Return cached parameter descriptors and paths.
- * @returns {Promise<object>}
- */
-async function getParams() {
-  // Return cached parameter metadata for the running DSP.
-  ensureRunning();
-  const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
-  return { status: 'ok', params: paramsCache, param_paths: paramPaths };
-}
-
-/**
- * Return current values for all known parameters (inputs + outputs).
- * @returns {Promise<object>}
- */
-async function getParamValues() {
-  ensureRunning();
-  const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
-  const values = paramPaths.map((path) => ({
-    path,
-    value: faustNode.getParamValue(path),
-  }));
-
-  // Add output parameter values (bargraphs) from the handler cache
-  for (const [path, value] of Object.entries(outputParamsCache)) {
-    // Only add if not already in values (avoid duplicates)
-    if (!values.some((v) => v.path === path)) {
-      values.push({ path, value });
+    const generator = this.compilerManager.createGenerator();
+    const wrapped = wrapTestInputs(
+      dsp_code,
+      input_source,
+      input_freq,
+      input_file,
+      hide_meters,
+    );
+    const compiled = await generator.compile(
+      this.compilerManager.compiler,
+      name,
+      wrapped.code,
+      '-ftz 2',
+    );
+    if (!compiled) {
+      throw new Error('Faust compilation failed');
     }
-  }
 
-  return { status: 'ok', values };
-}
+    this.faustNode = await generator.createNode(this.audioContext);
+    if (!this.faustNode) {
+      throw new Error('Failed to create Faust node');
+    }
 
-/**
- * Return RMS/Peak metering for the running DSP (with optional scope/spectrum).
- *
- * Options:
- * - include_scope: include time-domain samples aligned to a rising edge
- * - include_spectrum: include FFT bins (dB) and frequency axis
- * - per_channel: include per-channel scope/spectrum arrays
- * - fft_size, smoothing, min_db, max_db, edge_threshold, log_bins: analyser tuning
- *
- * Response shape:
- * - input.channels / output.mix / output.channels / probes
- * - optional scope + spectrum blocks (with optional per-channel arrays)
- *
- * @returns {Promise<object>}
- */
-async function getAudioMetrics() {
-  ensureRunning();
-  const {
-    include_scope,
-    include_spectrum,
-    per_channel,
-    fft_size,
-    smoothing,
-    min_db,
-    max_db,
-    edge_threshold,
-    log_bins,
-  } = normalizeAudioMetricsOptions(arguments.length > 0 ? arguments[0] : {});
-
-  syncAnalyserConfig({
-    fft_size,
-    smoothing,
-    min_db,
-    max_db,
-  });
-
-  const metrics = computeAudioMetrics();
-  if (include_scope && analyserNode) {
-    metrics.scope = collectScopePayload(analyserNode, {
-      edge_threshold,
-      sample_rate: audioContext?.sampleRate ?? null,
+    // Register handler for output parameters (bargraphs).
+    this.outputParamsCache = {};
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
     });
-  }
-  if (include_spectrum && analyserNode) {
-    metrics.spectrum = collectSpectrumPayload(analyserNode, audioContext, {
-      log_bins,
-    });
-  }
+    if (typeof this.faustNode.setOutputParamHandler === 'function') {
+      this.faustNode.setOutputParamHandler((path, value) => {
+        this.outputParamsCache[path] = value;
+      });
+    }
 
-  if ((include_scope || include_spectrum) && per_channel) {
-    ensureChannelAnalysers();
-    if (channelAnalysers.length > 0) {
-      if (include_scope && metrics.scope) {
-        metrics.scope.channels = channelAnalysers.map((analyser, idx) => {
-          return {
-            index: idx,
-            ...collectScopePayload(analyser, {
-              edge_threshold,
-              sample_rate: audioContext?.sampleRate ?? null,
-            }),
-          };
-        });
-      }
-      if (include_spectrum && metrics.spectrum) {
-        metrics.spectrum.channels = channelAnalysers.map((analyser, idx) => {
-          return {
-            index: idx,
-            ...collectSpectrumPayload(analyser, audioContext, {
-              log_bins,
-            }),
-          };
-        });
+    // Handle file input: load audio file and connect to FAUST input.
+    if (wrapped.useExternalInput && wrapped.inputFile) {
+      try {
+        const fileBuffer = fs.readFileSync(wrapped.inputFile);
+        const arrayBuffer = fileBuffer.buffer.slice(
+          fileBuffer.byteOffset,
+          fileBuffer.byteOffset + fileBuffer.byteLength,
+        );
+
+        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+        this.fileSourceNode = this.audioContext.createBufferSource();
+        this.fileSourceNode.buffer = audioBuffer;
+        this.fileSourceNode.loop = true;
+
+        this.fileSourceNode.connect(this.faustNode);
+        this.fileSourceNode.start();
+
+        console.error(
+          `Loaded audio file: ${wrapped.inputFile} ` +
+          `(${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.sampleRate}Hz)`,
+        );
+      } catch (err) {
+        throw new Error(`Failed to load audio file: ${err.message}`);
       }
     }
-  }
-  return metrics;
-}
 
-/**
- * Set multiple parameter values on the running DSP.
- * @param {{values: Array<{path: string, value: number}>}} params
- * @returns {Promise<object>}
- */
-async function setParamValues({ values }) {
-  ensureRunning();
-  if (!Array.isArray(values)) {
-    throw new Error('values must be an array');
-  }
-  const updated = [];
-  for (const entry of values) {
-    if (!entry || typeof entry.path !== 'string') {
-      throw new Error('Each entry must include a path string');
-    }
-    if (typeof entry.value !== 'number') {
-      throw new Error('Each entry must include a numeric value');
-    }
-    faustNode.setParamValue(entry.path, entry.value);
-    updated.push({
-      path: entry.path,
-      value: faustNode.getParamValue(entry.path),
+    this.faustNode.start();
+
+    const jsonStr = this.faustNode.getJSON();
+    this.faustJson = JSON.parse(jsonStr);
+    this.dspName = this.faustJson?.name || name || null;
+    this.paramsCache = extractParamsFromJson(this.faustJson);
+    this.meterUnitsByPath = extractBargraphUnits(this.faustJson);
+    this.meterProbesByPath = extractBargraphProbes(this.faustJson);
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
     });
-  }
-  return { status: 'ok', values: updated };
-}
+    this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
 
-/**
- * Stop playback and reset the DSP state.
- * @returns {Promise<object>}
- */
-async function stop() {
-  // Stop audio and reset state.
-  if (fileSourceNode) {
-    try {
-      fileSourceNode.stop();
-    } catch (_) {}
-    fileSourceNode = null;
+    return {
+      status: 'started',
+      name,
+      latency_hint: hint,
+      inputs: this.faustJson.inputs ?? null,
+      outputs: this.faustJson.outputs ?? null,
+      params: this.paramsCache,
+      param_paths: this.getParamPaths(),
+      faust_json: this.faustJson,
+    };
   }
-  if (faustNode) {
-    try {
-      faustNode.stop();
-    } catch (_) {}
-  }
-  if (audioContext) {
-    try {
-      await audioContext.close();
-    } catch (_) {}
-  }
-  faustNode = null;
-  audioContext = null;
-  analyserNode = null;
-  channelSplitter = null;
-  channelAnalysers = [];
-  faustJson = null;
-  paramsCache = [];
-  outputParamsCache = {};
-  meterUnitsByPath = {};
-  meterProbesByPath = {};
-  return { status: 'stopped' };
-}
 
-/**
- * Resolve the faust-ui bundle root directory.
- * @returns {string}
- */
-function resolveUiRoot() {
-  if (UI_ROOT) return UI_ROOT;
-  try {
-    const require = createRequire(path.join(MCP_ROOT, 'ui', 'package.json'));
-    const uiFile = require.resolve('@shren/faust-ui/dist/esm/index.js');
-    return path.dirname(uiFile);
-  } catch (_) {
-    return '';
+  /**
+   * Stop playback and reset the DSP state.
+   * @returns {Promise<object>}
+   */
+  async stop() {
+    if (this.fileSourceNode) {
+      try {
+        this.fileSourceNode.stop();
+      } catch (_) {}
+      this.fileSourceNode = null;
+    }
+    if (this.faustNode) {
+      try {
+        this.faustNode.stop();
+      } catch (_) {}
+    }
+    if (this.audioContext) {
+      try {
+        await this.audioContext.close();
+      } catch (_) {}
+    }
+    this.resetState();
+    return { status: 'stopped' };
   }
-}
 
-/**
- * Start the UI HTTP server if enabled.
- */
-function startUiServer() {
-  if (!UI_PORT || uiServer) return;
-  const uiHtmlPath = path.join(MCP_ROOT, 'ui', 'rt-ui.html');
-  const resolvedUiRoot = resolveUiRoot();
+  /**
+   * Return RMS/Peak metering plus optional scope/spectrum payloads.
+   * @param {object} options
+   * @returns {object}
+   */
+  getAudioMetrics(options) {
+    this.ensureRunning();
+    return this.metricsCollector.getMetrics(options);
+  }
 
-  uiServer = http.createServer((req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host}`);
-    if (url.pathname === '/') {
-      const html = fs.readFileSync(uiHtmlPath, 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(html);
-      return;
+  /**
+   * Set a parameter value on the running DSP.
+   * @param {{path: string, value: number}} params
+   * @returns {object}
+   */
+  setParam({ path, value }) {
+    this.ensureRunning();
+    this.faustNode.setParamValue(path, value);
+    const current = this.faustNode.getParamValue(path);
+    return { status: 'ok', path, value: current };
+  }
+
+  /**
+   * Get the current value of a parameter on the running DSP.
+   * @param {{path: string}} params
+   * @returns {object}
+   */
+  getParam({ path }) {
+    this.ensureRunning();
+    const current = this.faustNode.getParamValue(path);
+    return { status: 'ok', path, value: current };
+  }
+
+  /**
+   * Return cached parameter descriptors and paths.
+   * @returns {object}
+   */
+  getParams() {
+    this.ensureRunning();
+    return { status: 'ok', params: this.paramsCache, param_paths: this.getParamPaths() };
+  }
+
+  /**
+   * Return current values for all known parameters (inputs + outputs).
+   * @returns {object}
+   */
+  getParamValues() {
+    this.ensureRunning();
+    const paramPaths = this.getParamPaths();
+    const values = paramPaths.map((path) => ({
+      path,
+      value: this.faustNode.getParamValue(path),
+    }));
+
+    for (const [path, value] of Object.entries(this.outputParamsCache)) {
+      if (!values.some((v) => v.path === path)) {
+        values.push({ path, value });
+      }
     }
 
-    if (url.pathname === '/params') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ params: paramsCache }));
-      return;
-    }
+    return { status: 'ok', values };
+  }
 
-    if (url.pathname === '/param-values') {
-      if (!faustNode) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ values: [] }));
+  /**
+   * Set multiple parameter values on the running DSP.
+   * @param {{values: Array<{path: string, value: number}>}} params
+   * @returns {object}
+   */
+  setParamValues({ values }) {
+    this.ensureRunning();
+    if (!Array.isArray(values)) {
+      throw new Error('values must be an array');
+    }
+    const updated = [];
+    for (const entry of values) {
+      if (!entry || typeof entry.path !== 'string') {
+        throw new Error('Each entry must include a path string');
+      }
+      if (typeof entry.value !== 'number') {
+        throw new Error('Each entry must include a numeric value');
+      }
+      this.faustNode.setParamValue(entry.path, entry.value);
+      updated.push({
+        path: entry.path,
+        value: this.faustNode.getParamValue(entry.path),
+      });
+    }
+    return { status: 'ok', values: updated };
+  }
+}
+
+/**
+ * Simple HTTP server for the rt-ui HTML + Faust UI assets.
+ */
+class UiServer {
+  /**
+   * @param {{uiPort: number, uiRoot: string, mcpRoot: string, runtime: WorkerRuntime}} params
+   */
+  constructor({ uiPort, uiRoot, mcpRoot, runtime }) {
+    this.uiPort = uiPort;
+    this.uiRoot = uiRoot;
+    this.mcpRoot = mcpRoot;
+    this.runtime = runtime;
+    this.server = null;
+    this.resolvedUiRoot = '';
+  }
+
+  /**
+   * Resolve the faust-ui bundle root directory.
+   * @returns {string}
+   */
+  resolveUiRoot() {
+    if (this.uiRoot) return this.uiRoot;
+    try {
+      const require = createRequire(path.join(this.mcpRoot, 'ui', 'package.json'));
+      const uiFile = require.resolve('@shren/faust-ui/dist/esm/index.js');
+      return path.dirname(uiFile);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /**
+   * Start the UI HTTP server if enabled.
+   */
+  start() {
+    if (!this.uiPort || this.server) return;
+    const uiHtmlPath = path.join(this.mcpRoot, 'ui', 'rt-ui.html');
+    this.resolvedUiRoot = this.resolveUiRoot();
+
+    this.server = http.createServer((req, res) => {
+      const url = new URL(req.url || '/', `http://${req.headers.host}`);
+      if (url.pathname === '/') {
+        const html = fs.readFileSync(uiHtmlPath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(html);
         return;
       }
-      const paramPaths = faustNode.getParams?.() ?? paramsCache.map((p) => p.path);
-      const values = paramPaths.map((path) => ({
-        path,
-        value: faustNode.getParamValue(path),
-      }));
-      // Add output parameter values (bargraphs) from the handler cache
-      for (const [path, value] of Object.entries(outputParamsCache)) {
-        if (!values.some((v) => v.path === path)) {
-          values.push({ path, value });
-        }
+
+      if (url.pathname === '/params') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ params: this.runtime.paramsCache }));
+        return;
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ values }));
-      return;
-    }
 
-    if (url.pathname === '/status') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ name: dspName, running: !!faustNode }));
-      return;
-    }
-
-    if (url.pathname === '/json') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(faustJson || {}));
-      return;
-    }
-
-    if (url.pathname === '/param' && req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk) => (body += chunk));
-      req.on('end', async () => {
-        try {
-          const data = JSON.parse(body || '{}');
-          if (!data.path) throw new Error('Missing path');
-          if (typeof data.value !== 'number') throw new Error('Missing value');
-          await setParam({ path: data.path, value: data.value });
+      if (url.pathname === '/param-values') {
+        if (!this.runtime.faustNode) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ status: 'ok' }));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: String(err) }));
+          res.end(JSON.stringify({ values: [] }));
+          return;
         }
-      });
-      return;
-    }
-
-    if (url.pathname.startsWith('/faust-ui/') && resolvedUiRoot) {
-      const rel = url.pathname.replace('/faust-ui/', '');
-      const filePath = path.join(resolvedUiRoot, rel);
-      if (fs.existsSync(filePath)) {
-        const contentType = filePath.endsWith('.css')
-          ? 'text/css'
-          : 'application/javascript';
-        res.writeHead(200, { 'Content-Type': contentType });
-        res.end(fs.readFileSync(filePath));
-      } else {
-        res.writeHead(404);
-        res.end('Not found');
+        const values = this.runtime.getParamValues().values;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ values }));
+        return;
       }
-      return;
-    }
 
-    res.writeHead(404);
-    res.end('Not found');
-  });
+      if (url.pathname === '/status') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          name: this.runtime.dspName,
+          running: !!this.runtime.faustNode,
+        }));
+        return;
+      }
 
-  uiServer.on('error', (err) => {
-    if (err && err.code === 'EADDRINUSE') {
-      console.error(`UI port ${UI_PORT} already in use; UI server disabled.`);
-      uiServer = null;
-      return;
-    }
-    console.error('UI server error:', err);
-  });
+      if (url.pathname === '/json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(this.runtime.faustJson || {}));
+        return;
+      }
 
-  uiServer.listen(UI_PORT, () => {
-    const uiMode = resolvedUiRoot ? 'faust-ui' : 'fallback';
-    console.log(`UI server listening on http://127.0.0.1:${UI_PORT}/ (${uiMode})`);
-  });
+      if (url.pathname === '/param' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body || '{}');
+            if (!data.path) throw new Error('Missing path');
+            if (typeof data.value !== 'number') throw new Error('Missing value');
+            this.runtime.setParam({ path: data.path, value: data.value });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'ok' }));
+          } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: String(err) }));
+          }
+        });
+        return;
+      }
+
+      if (url.pathname.startsWith('/faust-ui/') && this.resolvedUiRoot) {
+        const rel = url.pathname.replace('/faust-ui/', '');
+        const filePath = path.join(this.resolvedUiRoot, rel);
+        if (fs.existsSync(filePath)) {
+          const contentType = filePath.endsWith('.css')
+            ? 'text/css'
+            : 'application/javascript';
+          res.writeHead(200, { 'Content-Type': contentType });
+          res.end(fs.readFileSync(filePath));
+        } else {
+          res.writeHead(404);
+          res.end('Not found');
+        }
+        return;
+      }
+
+      res.writeHead(404);
+      res.end('Not found');
+    });
+
+    this.server.on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        console.error(`UI port ${this.uiPort} already in use; UI server disabled.`);
+        this.server = null;
+        return;
+      }
+      console.error('UI server error:', err);
+    });
+
+    this.server.listen(this.uiPort, () => {
+      const uiMode = this.resolvedUiRoot ? 'faust-ui' : 'fallback';
+      console.log(`UI server listening on http://127.0.0.1:${this.uiPort}/ (${uiMode})`);
+    });
+  }
+
+  /**
+   * Stop the UI HTTP server if running.
+   */
+  stop() {
+    if (!this.server) return;
+    this.server.close();
+    this.server = null;
+  }
 }
 
-const handlers = {
-  check_syntax: checkSyntax,
-  compile_and_start: compileAndStart,
-  set_param: setParam,
-  get_param: getParam,
-  get_params: getParams,
-  get_param_values: getParamValues,
-  get_audio_metrics: getAudioMetrics,
-  set_param_values: setParamValues,
-  stop,
-};
-
-console.log('Faust realtime worker starting');
-startUiServer();
-
-// Minimal JSON-over-stdin protocol for the Python MCP server.
-const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-
-rl.on('line', async (line) => {
-  if (!line.trim()) return;
-  let msg;
-  try {
-    msg = JSON.parse(line);
-  } catch (e) {
-    process.stdout.write(JSON.stringify({ id: null, error: 'Invalid JSON' }) + '\n');
-    return;
+/**
+ * Minimal JSON-over-stdin protocol wrapper for the Python MCP server.
+ */
+class ProtocolServer {
+  /**
+   * @param {{handlers: Record<string, Function>}} params
+   */
+  constructor({ handlers }) {
+    this.handlers = handlers;
+    this.rl = null;
   }
 
-  const { id, method, params } = msg;
-  const handler = handlers[method];
-  if (!handler) {
-    process.stdout.write(JSON.stringify({ id, error: `Unknown method: ${method}` }) + '\n');
-    return;
+  /**
+   * Start reading stdin for JSON requests.
+   */
+  start() {
+    if (this.rl) return;
+    this.rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+    this.rl.on('line', (line) => this.handleLine(line));
   }
 
-  try {
-    const result = await handler(params || {});
-    process.stdout.write(JSON.stringify({ id, result }) + '\n');
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    process.stdout.write(JSON.stringify({ id, error: message }) + '\n');
+  /**
+   * Parse and dispatch a single JSON line.
+   * @param {string} line
+   * @returns {Promise<void>}
+   */
+  async handleLine(line) {
+    if (!line.trim()) return;
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch (_) {
+      process.stdout.write(JSON.stringify({ id: null, error: 'Invalid JSON' }) + '\n');
+      return;
+    }
+
+    const { id, method, params } = msg;
+    const handler = this.handlers[method];
+    if (!handler) {
+      process.stdout.write(JSON.stringify({ id, error: `Unknown method: ${method}` }) + '\n');
+      return;
+    }
+
+    try {
+      const result = await handler(params || {});
+      process.stdout.write(JSON.stringify({ id, result }) + '\n');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stdout.write(JSON.stringify({ id, error: message }) + '\n');
+    }
   }
-});
+}
+
+/**
+ * Top-level app that wires context, runtime, UI, and protocol servers.
+ */
+class WorkerApp {
+  /**
+   * Construct the app and its dependencies.
+   */
+  constructor() {
+    this.context = new WorkerContext();
+    this.compilerManager = new FaustCompilerManager(this.context);
+    this.runtime = new WorkerRuntime({ compilerManager: this.compilerManager });
+    this.uiServer = new UiServer({
+      uiPort: this.context.uiPort,
+      uiRoot: this.context.uiRoot,
+      mcpRoot: this.context.mcpRoot,
+      runtime: this.runtime,
+    });
+    this.handlers = this.buildHandlers();
+    this.protocolServer = new ProtocolServer({ handlers: this.handlers });
+  }
+
+  /**
+   * Build the method map exposed to the protocol server.
+   * @returns {Record<string, Function>}
+   */
+  buildHandlers() {
+    return {
+      check_syntax: (params) => this.compilerManager.checkSyntax(params || {}),
+      compile_and_start: (params) => this.runtime.compileAndStart(params || {}),
+      set_param: (params) => this.runtime.setParam(params || {}),
+      get_param: (params) => this.runtime.getParam(params || {}),
+      get_params: () => this.runtime.getParams(),
+      get_param_values: () => this.runtime.getParamValues(),
+      get_audio_metrics: (params) => this.runtime.getAudioMetrics(params || {}),
+      set_param_values: (params) => this.runtime.setParamValues(params || {}),
+      stop: () => this.runtime.stop(),
+    };
+  }
+
+  /**
+   * Start the UI + protocol servers.
+   */
+  start() {
+    console.log('Faust realtime worker starting');
+    this.uiServer.start();
+    this.protocolServer.start();
+  }
+}
+
+// Start the worker app.
+const workerApp = new WorkerApp();
+workerApp.start();

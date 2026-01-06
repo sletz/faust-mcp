@@ -82,7 +82,8 @@ setup:
 	$(PYTHON) -m pip install -r requirements.txt
 
 setup-rt:
-	cd $(WEBAUDIO_ROOT) && npm install && npm run build
+	git submodule update --init --remote $(WEBAUDIO_ROOT)
+	cd $(WEBAUDIO_ROOT) && npm install && npm up && npm run build
 
 setup-ui:
 	cd ui && npm install
