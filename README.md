@@ -418,8 +418,16 @@ Then open:
 automatically injected by the real-time server when it wraps your Faust DSP
 code. The wrapper adds output meters for each channel and a mono mix meter
 (Mix Peak/Mix RMS). Output meters are always injected; input meters are only
-injected when `input_source` is `sine`, `noise`, or `file`. If you want to hide
-the meters in compatible UIs, pass `hide_meters=true` to `compile_and_start`.
+injected when `input_source` is `sine`, `noise`, or `file`. `get_audio_metrics()`
+returns input meters under `input.channels` and output meters under `output`.
+If you want to hide the meters in compatible UIs, pass `hide_meters=true` to
+`compile_and_start`.
+
+`hasNaN` is reported for the output mix and each output channel (inputs omit it).
+
+Metering/probe bargraphs are added via `attach`, so they do **not** change the
+DSP audio I/O count. The compiled DSP keeps the same number of inputs/outputs;
+only UI bargraphs are appended for metering/probing.
 
 When a bargraph includes `[unit:dB]` metadata, `get_audio_metrics()` converts its
 value to linear amplitude before returning it. The conversion is
@@ -434,10 +442,20 @@ them alongside the standard mix/channel meters.
 
 ```json
 {
-  "mix": { "rms": 0.23, "peak": 0.45, "hasNaN": false },
-  "channels": [
-    { "rms": 0.2, "peak": 0.42 },
-    { "rms": 0.25, "peak": 0.48 }
+  "input": {
+    "channels": [
+      { "rms": 0.2, "peak": 0.42 }
+    ]
+  },
+  "output": {
+    "mix": { "rms": 0.23, "peak": 0.45, "hasNaN": false },
+    "channels": [
+      { "rms": 0.2, "peak": 0.42, "hasNaN": false },
+      { "rms": 0.25, "peak": 0.48, "hasNaN": false }
+    ]
+  },
+  "probes": [
+    { "id": 0, "value": 0.57 }
   ]
 }
 ```

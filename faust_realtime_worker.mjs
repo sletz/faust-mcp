@@ -244,18 +244,41 @@ function normalizeMeterPath(path) {
 
 /**
  * Compute output metering (RMS/Peak) from cached bargraph values.
- * @returns {{ mix: { rms: number, peak: number, hasNaN: boolean }, channels: Array<{ rms: number|null, peak: number|null }>, probes: Array<{ id: number, value: number }> }}
+ * @returns {{ input: { channels: Array<{ rms: number|null, peak: number|null }> }, output: { mix: { rms: number, peak: number, hasNaN: boolean }, channels: Array<{ rms: number|null, peak: number|null }> }, probes: Array<{ id: number, value: number }> }}
  */
 function computeAudioMetrics() {
+  const inputPeakRegex = /Input Meters\/Peak ch(\d+)/;
+  const inputRmsRegex = /Input Meters\/RMS ch(\d+)/;
   const peakRegex = /Output Meters\/Peak ch(\d+)/;
   const rmsRegex = /Output Meters\/RMS ch(\d+)/;
   const mixPeakRegex = /Output Meters\/Mix Peak/;
   const mixRmsRegex = /Output Meters\/Mix RMS/;
-  const channels = [];
+  const inputChannels = [];
+  const outputChannels = [];
   const probes = {};
   let hasNaN = false;
   let mixRms = null;
   let mixPeak = null;
+
+  const applyChannelValue = (channels, idx, isPeak, value, includeNaNFlag) => {
+    if (!channels[idx]) {
+      channels[idx] = includeNaNFlag
+        ? { rms: null, peak: null, hasNaN: false }
+        : { rms: null, peak: null };
+    }
+    if (isPeak) {
+      channels[idx].peak = value;
+    } else {
+      channels[idx].rms = value;
+    }
+  };
+
+  const applyOutputChannelValue = (idx, isPeak, value) => {
+    applyChannelValue(outputChannels, idx, isPeak, value, true);
+    if (Number.isNaN(value)) {
+      outputChannels[idx].hasNaN = true;
+    }
+  };
 
   for (const [path, value] of Object.entries(outputParamsCache)) {
     const normalizedPath = normalizeMeterPath(path);
@@ -264,6 +287,15 @@ function computeAudioMetrics() {
     const probeId = meterProbesByPath[path];
     if (Number.isFinite(probeId)) {
       probes[probeId] = mappedValue;
+    }
+    const inputPeakMatch = normalizedPath.match(inputPeakRegex);
+    const inputRmsMatch = normalizedPath.match(inputRmsRegex);
+    if (inputPeakMatch || inputRmsMatch) {
+      const idx = parseInt((inputPeakMatch || inputRmsMatch)[1], 10);
+      if (!Number.isFinite(idx)) continue;
+      applyChannelValue(inputChannels, idx, !!inputPeakMatch, mappedValue, false);
+      if (Number.isNaN(mappedValue)) hasNaN = true;
+      continue;
     }
     if (mixPeakRegex.test(normalizedPath)) {
       const peak = mappedValue;
@@ -282,22 +314,18 @@ function computeAudioMetrics() {
     if (!peakMatch && !rmsMatch) continue;
     const idx = parseInt((peakMatch || rmsMatch)[1], 10);
     if (!Number.isFinite(idx)) continue;
-    if (!channels[idx]) {
-      channels[idx] = { rms: null, peak: null };
-    }
     if (peakMatch) {
-      const peak = mappedValue;
-      channels[idx].peak = peak;
-      if (Number.isNaN(peak)) hasNaN = true;
+      applyOutputChannelValue(idx, true, mappedValue);
+      if (Number.isNaN(mappedValue)) hasNaN = true;
     }
     if (rmsMatch) {
-      const rms = mappedValue;
-      channels[idx].rms = rms;
-      if (Number.isNaN(rms)) hasNaN = true;
+      applyOutputChannelValue(idx, false, mappedValue);
+      if (Number.isNaN(mappedValue)) hasNaN = true;
     }
   }
 
-  const definedChannels = channels.filter(Boolean);
+  const definedInputChannels = inputChannels.filter(Boolean);
+  const definedOutputChannels = outputChannels.filter(Boolean);
 
   const resolvedMixRms = mixRms ?? 0;
   const resolvedMixPeak = mixPeak ?? 0;
@@ -306,12 +334,17 @@ function computeAudioMetrics() {
     .sort((a, b) => a.id - b.id);
 
   return {
-    mix: {
-      rms: resolvedMixRms,
-      peak: resolvedMixPeak,
-      hasNaN,
+    input: {
+      channels: definedInputChannels,
     },
-    channels: definedChannels,
+    output: {
+      mix: {
+        rms: resolvedMixRms,
+        peak: resolvedMixPeak,
+        hasNaN,
+      },
+      channels: definedOutputChannels,
+    },
     probes: probeEntries,
   };
 }
@@ -406,12 +439,12 @@ function collectParams(items, acc) {
   }
 }
 
-function collectBargraphUnits(items, acc) {
-  // Recursively traverse UI items and collect bargraph units by address.
+function collectBargraphMeta(items, acc, metaKey, mapValue) {
+  // Recursively traverse UI items and collect bargraph metadata by address.
   for (const item of items || []) {
     if (!item || typeof item !== 'object') continue;
     if (item.items) {
-      collectBargraphUnits(item.items, acc);
+      collectBargraphMeta(item.items, acc, metaKey, mapValue);
       continue;
     }
 
@@ -420,32 +453,11 @@ function collectBargraphUnits(items, acc) {
     if (!isBargraph) continue;
 
     const meta = metaToObject(item.meta);
-    if (typeof item.address === 'string') {
-      acc[item.address] = meta.unit ?? null;
-    }
-  }
-}
-
-function collectBargraphProbes(items, acc) {
-  // Recursively traverse UI items and collect bargraph probes by address.
-  for (const item of items || []) {
-    if (!item || typeof item !== 'object') continue;
-    if (item.items) {
-      collectBargraphProbes(item.items, acc);
-      continue;
-    }
-
-    const type = item.type;
-    const isBargraph = ['hbargraph', 'vbargraph'].includes(type);
-    if (!isBargraph) continue;
-
-    const meta = metaToObject(item.meta);
-    if (typeof item.address === 'string' && meta.probe !== undefined) {
-      const probeId = Number.parseInt(meta.probe, 10);
-      if (Number.isFinite(probeId)) {
-        acc[item.address] = probeId;
-      }
-    }
+    if (typeof item.address !== 'string') continue;
+    if (!(metaKey in meta)) continue;
+    const mapped = mapValue(meta[metaKey]);
+    if (mapped === undefined) continue;
+    acc[item.address] = mapped;
   }
 }
 
@@ -467,7 +479,7 @@ function extractParamsFromJson(jsonObj) {
  */
 function extractBargraphUnits(jsonObj) {
   const units = {};
-  collectBargraphUnits(jsonObj?.ui || [], units);
+  collectBargraphMeta(jsonObj?.ui || [], units, 'unit', (value) => value ?? null);
   return units;
 }
 
@@ -478,7 +490,10 @@ function extractBargraphUnits(jsonObj) {
  */
 function extractBargraphProbes(jsonObj) {
   const probes = {};
-  collectBargraphProbes(jsonObj?.ui || [], probes);
+  collectBargraphMeta(jsonObj?.ui || [], probes, 'probe', (value) => {
+    const probeId = Number.parseInt(value, 10);
+    return Number.isFinite(probeId) ? probeId : undefined;
+  });
   return probes;
 }
 
