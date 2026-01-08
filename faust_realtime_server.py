@@ -7,9 +7,14 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 
 Tools:
   - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
+  - compile(faust_code, name?, input_source?, input_freq?, input_file?, hide_meters?)
+  - start()
   - check_syntax(faust_code, name?)
   - get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)
+  - get_status()
   - get_midi_inputs()
+  - get_midi_status()
+  - get_dsp_json()
   - get_params()
   - get_param(path)
   - get_param_values()
@@ -119,7 +124,7 @@ class NodeWorker:
                 if response.get("id") != req_id:
                     continue
                 if "error" in response:
-                    raise RuntimeError(response["error"])
+                    return {"error": response["error"]}
                 return response.get("result", {})
 
     def stop(self) -> None:
@@ -179,6 +184,40 @@ def compile_and_start(
     )
     return json.dumps(result, indent=2)
 
+
+@mcp.tool()
+def compile(
+    faust_code: str,
+    name: str = "faust-rt",
+    input_source: str = "none",
+    input_freq: float | None = None,
+    input_file: str | None = None,
+    hide_meters: bool = False,
+) -> str:
+    """
+    Compile Faust DSP code without starting audio.
+    """
+
+    result = worker.request(
+        "compile",
+        {
+            "dsp_code": faust_code,
+            "name": name,
+            "input_source": input_source,
+            "input_freq": input_freq,
+            "input_file": input_file,
+            "hide_meters": hide_meters,
+        },
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def start() -> str:
+    """Start audio rendering for the compiled DSP."""
+
+    result = worker.request("start")
+    return json.dumps(result, indent=2)
 
 @mcp.tool()
 def get_params() -> str:
@@ -242,10 +281,34 @@ def get_audio_metrics(
 
 
 @mcp.tool()
+def get_status() -> str:
+    """Return the current real-time DSP status."""
+
+    result = worker.request("get_status")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_dsp_json() -> str:
+    """Return the full Faust JSON for the running DSP."""
+
+    result = worker.request("get_dsp_json")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 def get_midi_inputs() -> str:
     """List available MIDI input devices (Node backend)."""
 
     result = worker.request("get_midi_inputs")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_midi_status() -> str:
+    """Return MIDI backend status for the current session."""
+
+    result = worker.request("get_midi_status")
     return json.dumps(result, indent=2)
 
 

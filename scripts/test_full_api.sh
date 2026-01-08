@@ -25,6 +25,27 @@ python3 sse_client_example.py --url "${URL}" --tool compile_and_start --dsp "${D
 echo "== get_params =="
 python3 sse_client_example.py --url "${URL}" --tool get_params
 
+echo "== get_status =="
+python3 sse_client_example.py --url "${URL}" --tool get_status
+
+echo "== get_midi_inputs =="
+python3 sse_client_example.py --url "${URL}" --tool get_midi_inputs
+
+echo "== get_midi_status =="
+python3 sse_client_example.py --url "${URL}" --tool get_midi_status
+
+echo "== get_dsp_json =="
+python3 sse_client_example.py --url "${URL}" --tool get_dsp_json
+
+echo "== stop =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+
+echo "== compile (no start) =="
+python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}"
+
+echo "== start =="
+python3 sse_client_example.py --url "${URL}" --tool start
+
 echo "== get_param (gain) =="
 python3 sse_client_example.py --url "${URL}" --tool get_param --param-path "${GAIN_PATH}"
 

@@ -34,6 +34,21 @@ import {
   normalizeAudioMetricsOptions,
 } from './metrics_utils.mjs';
 
+const MCP_SCHEMA_VERSION = 'faust-mcp-rt/1';
+
+class ToolError extends Error {
+  /**
+   * @param {string} code
+   * @param {string} message
+   * @param {object} [details]
+   */
+  constructor(code, message, details = undefined) {
+    super(message);
+    this.code = code;
+    this.details = details;
+  }
+}
+
 /**
  * Immutable startup context (paths + env-configured settings).
  */
@@ -403,6 +418,8 @@ class WorkerRuntime {
     this.midiEnabled = false;
     this.dspName = null;
     this.fileSourceNode = null;
+    this.started = false;
+    this.fileSourceNodeStarted = false;
     this.metricsCollector.reset();
     this.metricsCollector.setMeterCaches({
       outputParamsCache: this.outputParamsCache,
@@ -416,8 +433,20 @@ class WorkerRuntime {
    */
   ensureRunning() {
     if (!this.faustNode) {
-      throw new Error('No running DSP. Call compile_and_start first.');
+      throw new ToolError(
+        'no_dsp',
+        'No running DSP. Call compile_and_start first.',
+      );
     }
+  }
+
+  /**
+   * Attach the MCP schema version to a response payload.
+   * @param {object} payload
+   * @returns {object}
+   */
+  withSchema(payload) {
+    return { schema_version: MCP_SCHEMA_VERSION, ...payload };
   }
 
   /**
@@ -433,7 +462,7 @@ class WorkerRuntime {
    * @param {object} params
    * @returns {Promise<object>}
    */
-  async compileAndStart({
+  async compileDSP({
     dsp_code,
     name,
     latency_hint,
@@ -447,6 +476,7 @@ class WorkerRuntime {
     if (this.audioContext) {
       await this.stop();
     }
+    this.started = false;
     this.paramsCache = [];
     this.meterUnitsByPath = {};
     this.meterProbesByPath = {};
@@ -474,7 +504,9 @@ class WorkerRuntime {
       '-ftz 2',
     );
     if (!compiledMono) {
-      throw new Error('Faust compilation failed');
+      throw new ToolError('compile_failed', 'Faust compilation failed', {
+        stage: 'mono',
+      });
     }
 
     let metaJson = null;
@@ -496,7 +528,9 @@ class WorkerRuntime {
         '-ftz 2',
       );
       if (!compiledPoly) {
-        throw new Error('Faust poly compilation failed');
+        throw new ToolError('compile_failed', 'Faust poly compilation failed', {
+          stage: 'poly',
+        });
       }
       this.faustNode = await polyGenerator.createNode(
         this.audioContext,
@@ -508,7 +542,7 @@ class WorkerRuntime {
     }
 
     if (!this.faustNode) {
-      throw new Error('Failed to create Faust node');
+      throw new ToolError('node_create_failed', 'Failed to create Faust node');
     }
 
     // Register handler for output parameters (bargraphs).
@@ -547,14 +581,18 @@ class WorkerRuntime {
         this.fileSourceNode.loop = true;
 
         this.fileSourceNode.connect(this.faustNode);
-        this.fileSourceNode.start();
+        this.fileSourceNodeStarted = false;
 
         console.error(
           `Loaded audio file: ${wrapped.inputFile} ` +
           `(${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.sampleRate}Hz)`,
         );
       } catch (err) {
-        throw new Error(`Failed to load audio file: ${err.message}`);
+        throw new ToolError(
+          'input_file_error',
+          `Failed to load audio file: ${err.message}`,
+          { input_file: wrapped.inputFile },
+        );
       }
     }
 
@@ -573,8 +611,8 @@ class WorkerRuntime {
     });
     this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
 
-    return {
-      status: 'started',
+    return this.withSchema({
+      status: 'compiled',
       name,
       latency_hint: hint,
       inputs: this.faustJson.inputs ?? null,
@@ -582,7 +620,38 @@ class WorkerRuntime {
       params: this.paramsCache,
       param_paths: this.getParamPaths(),
       faust_json: this.faustJson,
-    };
+    });
+  }
+
+  /**
+   * Start audio rendering for the compiled DSP.
+   * @returns {Promise<object>}
+   */
+  async startDSP() {
+    this.ensureRunning();
+    if (this.started) {
+      return this.withSchema({ status: 'started', already_started: true });
+    }
+    if (this.fileSourceNode && !this.fileSourceNodeStarted) {
+      try {
+        this.fileSourceNode.start();
+      } catch (_) {}
+      this.fileSourceNodeStarted = true;
+    }
+    this.faustNode.start();
+    this.started = true;
+    return this.withSchema({ status: 'started', name: this.dspName });
+  }
+
+  /**
+   * Compile DSP code and start audio rendering.
+   * @param {object} params
+   * @returns {Promise<object>}
+   */
+  async compileAndStart(params) {
+    const compiled = await this.compileDSP(params);
+    await this.startDSP();
+    return compiled;
   }
 
   /**
@@ -607,7 +676,7 @@ class WorkerRuntime {
       } catch (_) {}
     }
     this.resetState();
-    return { status: 'stopped' };
+    return this.withSchema({ status: 'stopped' });
   }
 
   /**
@@ -617,7 +686,7 @@ class WorkerRuntime {
    */
   getAudioMetrics(options) {
     this.ensureRunning();
-    return this.metricsCollector.getMetrics(options);
+    return this.withSchema(this.metricsCollector.getMetrics(options));
   }
 
   /**
@@ -629,7 +698,7 @@ class WorkerRuntime {
     this.ensureRunning();
     this.faustNode.setParamValue(path, value);
     const current = this.faustNode.getParamValue(path);
-    return { status: 'ok', path, value: current };
+    return this.withSchema({ status: 'ok', path, value: current });
   }
 
   /**
@@ -642,7 +711,7 @@ class WorkerRuntime {
     const current = Object.prototype.hasOwnProperty.call(this.inputParamsCache, path)
       ? this.inputParamsCache[path]
       : this.faustNode.getParamValue(path);
-    return { status: 'ok', path, value: current };
+    return this.withSchema({ status: 'ok', path, value: current });
   }
 
   /**
@@ -651,7 +720,20 @@ class WorkerRuntime {
    */
   getParams() {
     this.ensureRunning();
-    return { status: 'ok', params: this.paramsCache, param_paths: this.getParamPaths() };
+    return this.withSchema({
+      status: 'ok',
+      params: this.paramsCache,
+      param_paths: this.getParamPaths(),
+    });
+  }
+
+  /**
+   * Return the full Faust JSON for the current DSP.
+   * @returns {object}
+   */
+  getDspJson() {
+    this.ensureRunning();
+    return this.withSchema({ status: 'ok', faust_json: this.faustJson });
   }
 
   /**
@@ -686,7 +768,7 @@ class WorkerRuntime {
       }
     }
 
-    return { status: 'ok', values };
+    return this.withSchema({ status: 'ok', values });
   }
 
 
@@ -698,15 +780,15 @@ class WorkerRuntime {
   setParamValues({ values }) {
     this.ensureRunning();
     if (!Array.isArray(values)) {
-      throw new Error('values must be an array');
+      throw new ToolError('invalid_params', 'values must be an array');
     }
     const updated = [];
     for (const entry of values) {
       if (!entry || typeof entry.path !== 'string') {
-        throw new Error('Each entry must include a path string');
+        throw new ToolError('invalid_params', 'Each entry must include a path string');
       }
       if (typeof entry.value !== 'number') {
-        throw new Error('Each entry must include a numeric value');
+        throw new ToolError('invalid_params', 'Each entry must include a numeric value');
       }
       this.faustNode.setParamValue(entry.path, entry.value);
       updated.push({
@@ -714,7 +796,7 @@ class WorkerRuntime {
         value: this.faustNode.getParamValue(entry.path),
       });
     }
-    return { status: 'ok', values: updated };
+    return this.withSchema({ status: 'ok', values: updated });
   }
 }
 
@@ -943,6 +1025,7 @@ class MidiInputManager {
     this.noteOnCount = 0;
     this.noteOffCount = 0;
     this.activeNotes = new Set();
+    this.lastMessage = null;
   }
 
   /**
@@ -1104,6 +1187,10 @@ class MidiInputManager {
         }
       }
     }
+    this.lastMessage = {
+      data: Array.from(data),
+      timestamp: Date.now(),
+    };
     if (this.debug) {
       if (type === 0x90 && velocity > 0) {
         this.noteOnCount += 1;
@@ -1117,6 +1204,31 @@ class MidiInputManager {
     try {
       node.midiMessage(data);
     } catch (_) {}
+  }
+
+  /**
+   * Return MIDI backend status for the current session.
+   * @returns {Promise<object>}
+   */
+  async getStatus() {
+    const ok = await this.ensureBackend();
+    if (!ok) {
+      return {
+        status: 'error',
+        available: false,
+        error: this.lastError,
+        selected: null,
+        last_message: this.lastMessage,
+      };
+    }
+    return {
+      status: 'ok',
+      available: true,
+      selected: this.selectedIndex === null
+        ? null
+        : { index: this.selectedIndex, name: this.selectedName },
+      last_message: this.lastMessage,
+    };
   }
 }
 
@@ -1168,7 +1280,17 @@ class ProtocolServer {
       process.stdout.write(JSON.stringify({ id, result }) + '\n');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      process.stdout.write(JSON.stringify({ id, error: message }) + '\n');
+      const code = err && typeof err === 'object' && err.code ? err.code : 'runtime_error';
+      const details = err && typeof err === 'object' ? err.details : undefined;
+      process.stdout.write(JSON.stringify({
+        id,
+        error: {
+          schema_version: MCP_SCHEMA_VERSION,
+          code,
+          message,
+          details: details ?? null,
+        },
+      }) + '\n');
     }
   }
 }
@@ -1206,13 +1328,25 @@ class WorkerApp {
   buildHandlers() {
     return {
       check_syntax: (params) => this.compilerManager.checkSyntax(params || {}),
+      compile: (params) => this.runtime.compileDSP(params || {}),
+      start: () => this.runtime.startDSP(),
       compile_and_start: (params) => this.runtime.compileAndStart(params || {}),
       set_param: (params) => this.runtime.setParam(params || {}),
       get_param: (params) => this.runtime.getParam(params || {}),
       get_params: () => this.runtime.getParams(),
+      get_dsp_json: () => this.runtime.getDspJson(),
       get_param_values: () => this.runtime.getParamValues(),
       get_audio_metrics: (params) => this.runtime.getAudioMetrics(params || {}),
+      get_status: () => ({
+        schema_version: MCP_SCHEMA_VERSION,
+        running: !!this.runtime.faustNode,
+        name: this.runtime.dspName,
+        poly_nvoices: this.runtime.polyNvoices,
+        midi_enabled: this.runtime.midiEnabled,
+        midi_active_notes: this.midiManager ? this.midiManager.getActiveNoteCount() : 0,
+      }),
       get_midi_inputs: () => this.midiManager.listInputs(),
+      get_midi_status: () => this.midiManager.getStatus(),
       select_midi_input: (params) => this.midiManager.selectInput(params || {}),
       set_param_values: (params) => this.runtime.setParamValues(params || {}),
       stop: () => this.runtime.stop(),

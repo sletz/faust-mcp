@@ -33,6 +33,8 @@ async def main(
     param_path: str | None,
     param_value: float | None,
     param_values: list[str] | None,
+    midi_index: int | None,
+    midi_name: str | None,
 ) -> None:
     """Call the requested MCP tool over SSE with the provided arguments.
 
@@ -43,13 +45,13 @@ async def main(
         async with ClientSession(read, write) as session:
             await session.initialize()
             args = None
-            if tool in ("compile_and_analyze", "compile_and_start", "check_syntax"):
+            if tool in ("compile_and_analyze", "compile_and_start", "compile", "check_syntax"):
                 if not dsp_path:
                     raise ValueError("--dsp is required for compile tools")
                 with open(dsp_path, "r", encoding="utf-8") as f:
                     dsp = f.read()
                 args = {"faust_code": dsp}
-                if tool in ("compile_and_analyze", "compile_and_start"):
+                if tool in ("compile_and_analyze", "compile_and_start", "compile"):
                     if input_source is not None:
                         args["input_source"] = input_source
                     if input_freq is not None:
@@ -61,6 +63,11 @@ async def main(
                         args["name"] = name
                     if latency_hint:
                         args["latency_hint"] = latency_hint
+                    if hide_meters:
+                        args["hide_meters"] = True
+                if tool == "compile":
+                    if name:
+                        args["name"] = name
                     if hide_meters:
                         args["hide_meters"] = True
                 elif tool == "check_syntax" and name:
@@ -85,7 +92,16 @@ async def main(
                 if not param_path or param_value is None:
                     raise ValueError("--param-path and --param-value are required for set_param")
                 args = {"path": param_path, "value": param_value}
-            elif tool in ("get_params", "get_audio_metrics", "stop"):
+            elif tool in (
+                "get_params",
+                "get_dsp_json",
+                "get_status",
+                "get_audio_metrics",
+                "get_midi_inputs",
+                "get_midi_status",
+                "start",
+                "stop",
+            ):
                 args = {}
                 if tool == "get_audio_metrics":
                     if include_scope:
@@ -106,6 +122,10 @@ async def main(
                         args["edge_threshold"] = edge_threshold
                     if log_bins is not None:
                         args["log_bins"] = log_bins
+            elif tool == "select_midi_input":
+                if midi_index is None and not midi_name:
+                    raise ValueError("--midi-index or --midi-name is required for select_midi_input")
+                args = {"index": midi_index, "name": midi_name}
             else:
                 raise ValueError(f"Unsupported tool: {tool}")
 
@@ -128,7 +148,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, get_audio_metrics, set_param_values, set_param, stop).",
+        help=(
+            "Tool name (compile_and_analyze, compile_and_start, compile, check_syntax, "
+            "get_params, get_param, get_param_values, get_audio_metrics, get_midi_inputs, "
+            "get_midi_status, select_midi_input, set_param_values, set_param, start, stop)."
+        ),
     )
     parser.add_argument(
         "--name",
@@ -229,6 +253,17 @@ if __name__ == "__main__":
         help="Repeated PATH=VALUE pairs for set_param_values.",
     )
     parser.add_argument(
+        "--midi-index",
+        type=int,
+        default=None,
+        help="MIDI input index for select_midi_input.",
+    )
+    parser.add_argument(
+        "--midi-name",
+        default=None,
+        help="MIDI input name for select_midi_input.",
+    )
+    parser.add_argument(
         "--tmpdir",
         default=None,
         help="Local TMPDIR override (client-side only).",
@@ -259,4 +294,6 @@ if __name__ == "__main__":
         args.param_path,
         args.param_value,
         args.param_values,
+        args.midi_index,
+        args.midi_name,
     )

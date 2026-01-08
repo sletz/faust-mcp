@@ -52,7 +52,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `get_midi_inputs`, `select_midi_input`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `get_midi_inputs`, `get_midi_status`, `select_midi_input`, `stop`.
 - Offline tools: `compile_and_analyze`.
 - DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
@@ -72,6 +72,7 @@ make setup-rt
 MIDI input (Node backend):
 
 - Use `get_midi_inputs` to list available inputs.
+- Use `get_midi_status` to confirm the selected device and see the last MIDI message.
 - Use `select_midi_input` with `index` or `name` to choose a single active device.
 - Selection is session-only (no persistence across restarts).
 
@@ -414,12 +415,17 @@ Then open:
 ### Real-time tools
 
 - `compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)`
+- `compile(faust_code, name?, input_source?, input_freq?, input_file?, hide_meters?)`
+- `start()`
 - `check_syntax(faust_code, name?)`
+- `get_status()`
 - `get_params()`
+- `get_dsp_json()`
 - `get_param(path)`
 - `get_param_values()`
 - `get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)`
 - `get_midi_inputs()`
+- `get_midi_status()`
 - `select_midi_input(index?, name?)`
 - `set_param_values(values)`
 - `set_param(path, value)`
@@ -464,6 +470,53 @@ Makefile helpers:
 - `make rt-get-audio-metrics-spectrum`
 - `make rt-get-audio-metrics-full`
 - `make rt-get-audio-metrics-full-per-channel`
+
+### Response schema versioning
+
+Real-time tool responses include `schema_version` (currently `faust-mcp-rt/1`).
+This allows MCP clients to detect changes and adapt safely.
+
+Structured errors are returned as:
+
+```json
+{
+  "error": {
+    "schema_version": "faust-mcp-rt/1",
+    "code": "compile_failed",
+    "message": "Faust compilation failed",
+    "details": { "stage": "poly" }
+  }
+}
+```
+
+### Tool: get_status
+
+`get_status()` returns a snapshot of the current DSP runtime state:
+
+```json
+{
+  "schema_version": "faust-mcp-rt/1",
+  "running": true,
+  "name": "faust-rt",
+  "poly_nvoices": 8,
+  "midi_enabled": true,
+  "midi_active_notes": 3
+}
+```
+
+### Tool: get_midi_status
+
+`get_midi_status()` returns the Node MIDI backend state for the current session,
+including the selected input (if any) and the most recent MIDI message.
+
+```json
+{
+  "status": "ok",
+  "available": true,
+  "selected": { "index": 1, "name": "MidiKeys" },
+  "last_message": { "data": [176, 7, 64], "timestamp": 1736367076123 }
+}
+```
 
 ```json
 {
