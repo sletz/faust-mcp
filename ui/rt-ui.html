@@ -5,87 +5,98 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Faust RT UI</title>
   <link rel="stylesheet" href="/faust-ui/index.css" />
-  <style>
-    :root { color-scheme: light; }
-    html, body { height: 100%; }
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      display: flex;
-      flex-direction: column;
-    }
-    .page {
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 auto;
-      min-height: 0;
-      padding: 20px 24px;
-    }
-    h1 { margin-bottom: 8px; text-align: center; }
-    .status { color: #444; margin-bottom: 16px; display: none; text-align: center; }
-    .param { margin: 10px 0; }
-    .param label { display: block; font-size: 13px; color: #333; }
-    .param input[type=range] { width: 320px; }
-    .param .value { display: inline-block; min-width: 60px; text-align: right; }
-    #fallback-ui { text-align: center; }
-    #fallback-ui .param { display: inline-block; text-align: left; margin: 10px 12px; }
-    #faust-ui-container {
-      margin-top: 16px;
-      flex: 1 1 auto;
-      min-height: 0;
-      position: relative;
-      display: flex;
-      border-radius: 6px;
-    }
-    #faust-ui-root {
-      position: absolute;
-      inset: 0;
-      overflow: auto;
-      display: flex;
-      flex-direction: column;
-      width: 100%;
-      height: 100%;
-    }
-    #dsp-name { font-weight: 600; margin-top: 4px; text-align: center; }
-    #midi-panel {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      justify-content: center;
-      margin-top: 8px;
-      font-size: 13px;
-    }
-    #midi-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      justify-content: center;
-    }
-    #midi-panel select { min-width: 220px; }
-    #midi-status { color: #666; }
-    #poly-active { color: #666; }
-  </style>
+  <link rel="stylesheet" href="/rt-ui.css" />
 </head>
 <body>
-  <div class="page">
-    <h1>Faust Real-time UI</h1>
-    <div class="status" id="status">Loading...</div>
-    <div id="dsp-name"></div>
-    <div id="midi-panel">
-      <div id="midi-row">
-        <label for="midi-select">MIDI input</label>
-        <select id="midi-select">
-          <option value="">Loading…</option>
-        </select>
-        <span id="midi-status"></span>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="app-header-left">
+        <div class="app-title-row">
+          <div class="app-title">Faust MCP</div>
+          <div class="app-actions">
+            <button class="app-action-btn" id="compact-toggle" type="button" aria-pressed="false">
+              Compact
+            </button>
+          </div>
+        </div>
+        <div class="app-subtitle" id="dsp-name"></div>
+        <div class="status" id="status">Loading...</div>
       </div>
-      <span id="poly-active"></span>
-    </div>
-    <div id="faust-ui-container">
-      <div id="faust-ui-root"></div>
-    </div>
-    <div id="fallback-ui"></div>
+      <div class="app-header-right">
+        <div id="midi-panel">
+          <div id="midi-row">
+            <label for="midi-select">MIDI input</label>
+            <select id="midi-select">
+              <option value="">Loading...</option>
+            </select>
+            <span id="midi-status"></span>
+          </div>
+          <span id="poly-active"></span>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="panel panel-faust">
+        <div class="panel-header">Faust UI</div>
+        <div id="faust-ui-container">
+          <div id="faust-ui-root"></div>
+        </div>
+        <div id="fallback-ui"></div>
+      </section>
+
+      <div class="right-column">
+        <section class="panel panel-scope">
+          <div class="panel-header">Scope / Spectrum</div>
+          <div class="panel-body panel-scope-body">
+            <div class="scope-toolbar">
+              <button class="scope-tab is-active" type="button" data-mode="scope">Scope</button>
+              <button class="scope-tab" type="button" data-mode="spectrum">Spectrum</button>
+              <button class="scope-tab" type="button" data-mode="both">Both</button>
+              <select id="scope-channel">
+                <option value="mix">Mix</option>
+              </select>
+            </div>
+            <div class="scope-canvas">
+              <div class="scope-pane scope-pane-scope">
+                <div class="scope-grid"></div>
+                <canvas class="scope-render" id="scope-canvas"></canvas>
+              </div>
+              <div class="scope-pane scope-pane-spectrum">
+                <div class="scope-grid"></div>
+                <canvas class="scope-render is-hidden" id="spectrum-canvas"></canvas>
+              </div>
+              <div class="scope-label" id="scope-label">Waiting for analyser data...</div>
+            </div>
+            <div class="scope-meta" id="scope-meta">FFT 2048 · Smoothing 0.8</div>
+          </div>
+        </section>
+
+        <section class="panel panel-probe">
+          <div class="panel-header">Probes</div>
+          <div class="panel-body panel-probe-body">
+            <div class="probe-toolbar">
+              <label class="probe-label" for="probe-select">Probe</label>
+              <select id="probe-select">
+                <option value="">No probes</option>
+              </select>
+            </div>
+            <div class="probe-canvas">
+              <div class="probe-grid"></div>
+              <canvas class="probe-render" id="probe-canvas"></canvas>
+              <div class="probe-label-text" id="probe-label">No probe selected</div>
+            </div>
+            <div class="probe-meta" id="probe-meta">Value: --</div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer class="app-footer">
+      <div class="brand brand-footer">
+        <img class="brand-logo" src="/assets/LOGO_FAUST_COMPLET_ORANGE.png" alt="Faust logo" />
+        <div class="brand-text">Functional audio stream</div>
+      </div>
+    </footer>
   </div>
 
   <script type="module" src="/rt-ui.js"></script>

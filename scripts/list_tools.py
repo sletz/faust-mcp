@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""List available MCP tools from an SSE endpoint."""
+"""List available MCP tools from an SSE endpoint.
+
+Use this to sanity-check that a server is up and exposes the expected tools.
+"""
 
 import argparse
 
@@ -16,9 +19,11 @@ async def main(url: str, details: bool) -> None:
             await session.initialize()
             tools = await session.list_tools()
             if details:
+                # Full schema payload for debugging client integrations.
                 payload = [tool.model_dump() for tool in tools.tools]
                 print(json.dumps(payload, indent=2))
             else:
+                # Simple name list for quick smoke checks.
                 print([t.name for t in tools.tools])
 
 

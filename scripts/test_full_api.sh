@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# End-to-end sanity check for the SSE API + optional UI HTTP endpoints.
 set -euo pipefail
 
 URL="${MCP_URL:-http://127.0.0.1:8000/sse}"
@@ -11,6 +12,7 @@ FREQ1_PATH="${FREQ1_PATH:-/faust-rt/freq1}"
 FREQ2_PATH="${FREQ2_PATH:-/faust-rt/freq2}"
 SKIP_UI="${SKIP_UI:-0}"
 
+# Basic reachability check before running the full tool sequence.
 if ! curl -s -S "${HTTP_BASE}/status" >/dev/null; then
   echo "ERROR: MCP server not reachable at ${HTTP_BASE}" >&2
   exit 1
@@ -67,6 +69,7 @@ echo "== get_audio_metrics (scope+spectrum, per-channel) =="
 python3 sse_client_example.py --url "${URL}" --tool get_audio_metrics \
   --include-scope --include-spectrum --per-channel --fft-size 2048 --smoothing 0.8 --min-db -90 --max-db 0 --edge-threshold 0.1 --log-bins 48
 
+# Optional UI endpoint checks (skip with SKIP_UI=1).
 if [[ "${SKIP_UI}" != "1" ]]; then
   if curl -s -S "${UI_HTTP_BASE}/" >/dev/null; then
     echo "== ui http (root) =="

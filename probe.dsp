@@ -16,7 +16,7 @@ probe_peak_lin(id, hide, x) = x <: attach(x, an.peak_envelope(0.1)
 
 freq = hslider("freq", 440, 20, 2000, 1);
 gain = hslider("gain", 0.5, 0, 1, 0.01);
-gate = button("gate");
+gate = checkbox("gate");
 
 // Pipeline with probes at each stage
 osc = os.sawtooth(freq) : probe_rms_db(0, 0);

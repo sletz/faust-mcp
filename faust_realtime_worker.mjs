@@ -861,6 +861,57 @@ class UiServer {
         return;
       }
 
+      if (url.pathname === '/rt-ui.css') {
+        const filePath = path.join(this.mcpRoot, 'ui', 'rt-ui.css');
+        if (fs.existsSync(filePath)) {
+          res.writeHead(200, { 'Content-Type': 'text/css' });
+          res.end(fs.readFileSync(filePath));
+        } else {
+          res.writeHead(404);
+          res.end('Not found');
+        }
+        return;
+      }
+
+      if (url.pathname.startsWith('/assets/')) {
+        const rel = url.pathname.replace('/assets/', '');
+        const filePath = path.join(this.mcpRoot, 'ui', 'assets', rel);
+        if (fs.existsSync(filePath)) {
+          res.writeHead(200, { 'Content-Type': 'image/png' });
+          res.end(fs.readFileSync(filePath));
+        } else {
+          res.writeHead(404);
+          res.end('Not found');
+        }
+        return;
+      }
+
+      if (url.pathname === '/audio-metrics') {
+        const parseBool = (value) => value === 'true' || value === '1';
+        const opts = {
+          include_scope: parseBool(url.searchParams.get('include_scope')),
+          include_spectrum: parseBool(url.searchParams.get('include_spectrum')),
+          per_channel: parseBool(url.searchParams.get('per_channel')),
+          fft_size: url.searchParams.get('fft_size') ? Number(url.searchParams.get('fft_size')) : undefined,
+          smoothing: url.searchParams.get('smoothing') ? Number(url.searchParams.get('smoothing')) : undefined,
+          min_db: url.searchParams.get('min_db') ? Number(url.searchParams.get('min_db')) : undefined,
+          max_db: url.searchParams.get('max_db') ? Number(url.searchParams.get('max_db')) : undefined,
+          edge_threshold: url.searchParams.get('edge_threshold')
+            ? Number(url.searchParams.get('edge_threshold'))
+            : undefined,
+          log_bins: url.searchParams.get('log_bins') ? Number(url.searchParams.get('log_bins')) : undefined,
+        };
+        try {
+          const payload = this.runtime.getAudioMetrics(opts);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(payload));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
       if (url.pathname === '/params') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ params: this.runtime.paramsCache }));

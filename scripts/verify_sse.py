@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Minimal SSE verification helper for faust-mcp servers."""
+"""Minimal SSE verification helper for faust-mcp servers.
+
+Starts each server variant, runs a single tool call, then shuts it down.
+Useful for smoke tests in CI pipelines.
+"""
 
 from __future__ import annotations
 
@@ -68,7 +72,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Server 1: faust_server.py
+    # Server 1: faust_server.py (offline compile/analyze)
     if shutil.which("faust") is None:
         print("Skipping faust_server.py: `faust` not found in PATH.")
     else:
@@ -96,7 +100,7 @@ def main() -> int:
         finally:
             _stop_server(s1)
 
-    # Server 2: faust_server_daw.py
+    # Server 2: faust_server_daw.py (DawDreamer analysis)
     env = {
         "MCP_TRANSPORT": "sse",
         "MCP_HOST": "127.0.0.1",
@@ -125,7 +129,7 @@ def main() -> int:
     if args.skip_rt:
         return 0
 
-    # Server 3: faust_realtime_server.py
+    # Server 3: faust_realtime_server.py (WebAudio runtime)
     if shutil.which("node") is None:
         print("Skipping faust_realtime_server.py: `node` not found in PATH.")
         return 0

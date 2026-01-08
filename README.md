@@ -383,13 +383,19 @@ Endpoints used by the UI:
 - `GET /params`: cached parameter metadata
 - `GET /param-values`: current parameter values (polled)
 - `POST /param`: set a parameter value `{ path, value }`
+- `GET /audio-metrics`: scope/spectrum/probe data (polled)
 - `GET /faust-ui/*`: static assets for `@shren/faust-ui` (optional)
 
 The page polls `/json` and `/status` to detect DSP changes, and polls
-`/param-values` on a short interval (≈1.5s in `rt-ui.html`) to keep the UI
-in sync with parameter updates coming from MCP (`set_param`).
+`/param-values` on a short interval to keep the UI in sync with parameter
+updates coming from MCP (`set_param`). It also polls `/audio-metrics` to render
+scope/spectrum data and build the probe scope history buffer.
 For polyphonic DSPs, the UI also shows the current count of active voices
 just below the MIDI device selector.
+
+Probe scopes are derived from `get_audio_metrics().probes` values. The UI
+selects a probe ID and plots a rolling history of those values (no extra DSP
+analysis is required).
 
 ```bash
 WEBAUDIO_ROOT=external/node-web-audio-api \
@@ -790,6 +796,47 @@ MCP_HTTP_BASE=http://127.0.0.1:8000 \
 UI_HTTP_BASE=http://127.0.0.1:8787 \
 DSP=t2.dsp NAME=faust-rt \
 scripts/test_full_api.sh
+```
+
+### CI batch audio check
+
+`scripts/ci_batch_audio.py` compiles a batch of DSPs, collects audio metrics, and
+flags silence/clipping/NaN issues. It also reports probe values when available,
+so you can validate RMS/peak/probe signals across a DSP library.
+
+```bash
+# Requires the real-time server to be running (see make run-rt-ui).
+scripts/ci_batch_audio.py --glob "*.dsp" --input-source sine --input-freq 1000
+```
+
+You can adjust thresholds and warmup time:
+
+```bash
+scripts/ci_batch_audio.py --silence-threshold 0.001 --clip-threshold 1.0 --warmup-ms 400
+```
+
+Require probes to be present (fail otherwise):
+
+```bash
+scripts/ci_batch_audio.py --require-probes
+```
+
+### Scripts reference
+
+This repo ships a few helper scripts under `scripts/`:
+
+- `scripts/ci_batch_audio.py`: Batch compile DSPs, collect `get_audio_metrics()`, and flag silence/clipping/NaN. Supports optional probe checks (`--require-probes`).
+- `scripts/emit_wrapped_dsp.mjs`: Emit the Faust DSP code after MCP wrapping (useful to debug input/meters/effect wrapping).
+- `scripts/list_tools.py`: List MCP tools exposed by a running server (use `--details` for schema and params).
+- `scripts/test_full_api.sh`: End-to-end SSE tool exercise plus optional UI endpoint checks.
+- `scripts/verify_sse.py`: Lightweight SSE connectivity check for CI/health probes.
+
+Quick examples:
+
+```bash
+python3 scripts/list_tools.py --details
+node scripts/emit_wrapped_dsp.mjs --dsp t2.dsp
+scripts/verify_sse.py --url http://127.0.0.1:8000/sse
 ```
 
 ### stdio client

@@ -1,3 +1,4 @@
+// CLI helper to inspect the Faust code after MCP wrapping (inputs/meters/effects).
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
