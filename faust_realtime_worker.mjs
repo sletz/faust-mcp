@@ -33,6 +33,7 @@ import {
   computeAudioMetrics,
   normalizeAudioMetricsOptions,
 } from './metrics_utils.mjs';
+import { WebSocketMetricsServer } from './ws_metrics_server.mjs';
 
 const MCP_SCHEMA_VERSION = 'faust-mcp-rt/1';
 
@@ -815,6 +816,10 @@ class UiServer {
     this.midiManager = null;
     this.server = null;
     this.resolvedUiRoot = '';
+    this.wsServer = new WebSocketMetricsServer({
+      runtime,
+      schemaVersion: MCP_SCHEMA_VERSION,
+    });
   }
 
   /**
@@ -1033,6 +1038,8 @@ class UiServer {
       res.end('Not found');
     });
 
+    this.wsServer.attach(this.server);
+
     this.server.on('error', (err) => {
       if (err && err.code === 'EADDRINUSE') {
         console.error(`UI port ${this.uiPort} already in use; UI server disabled.`);
@@ -1053,6 +1060,7 @@ class UiServer {
    */
   stop() {
     if (!this.server) return;
+    this.wsServer.stop();
     this.server.close();
     this.server = null;
   }

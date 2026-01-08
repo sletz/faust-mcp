@@ -384,12 +384,15 @@ Endpoints used by the UI:
 - `GET /param-values`: current parameter values (polled)
 - `POST /param`: set a parameter value `{ path, value }`
 - `GET /audio-metrics`: scope/spectrum/probe data (polled)
+- `WS /ws`: optional metrics stream (scope/spectrum/probes) for the UI
 - `GET /faust-ui/*`: static assets for `@shren/faust-ui` (optional)
 
 The page polls `/json` and `/status` to detect DSP changes, and polls
 `/param-values` on a short interval to keep the UI in sync with parameter
 updates coming from MCP (`set_param`). It also polls `/audio-metrics` to render
-scope/spectrum data and build the probe scope history buffer.
+scope/spectrum data and build the probe scope history buffer. When `/ws` is
+available, the UI switches to WebSocket streaming and falls back to polling if
+the WS connection is unavailable.
 For polyphonic DSPs, the UI also shows the current count of active voices
 just below the MIDI device selector.
 
@@ -476,6 +479,7 @@ Makefile helpers:
 - `make rt-get-audio-metrics-spectrum`
 - `make rt-get-audio-metrics-full`
 - `make rt-get-audio-metrics-full-per-channel`
+- `make rt-ws-metrics`
 
 ### Response schema versioning
 
@@ -829,6 +833,7 @@ This repo ships a few helper scripts under `scripts/`:
 - `scripts/emit_wrapped_dsp.mjs`: Emit the Faust DSP code after MCP wrapping (useful to debug input/meters/effect wrapping).
 - `scripts/list_tools.py`: List MCP tools exposed by a running server (use `--details` for schema and params).
 - `scripts/test_full_api.sh`: End-to-end SSE tool exercise plus optional UI endpoint checks.
+- `scripts/test_ws_metrics.py`: Connect to `/ws`, subscribe, and wait for a metrics frame.
 - `scripts/verify_sse.py`: Lightweight SSE connectivity check for CI/health probes.
 
 Quick examples:
@@ -837,6 +842,7 @@ Quick examples:
 python3 scripts/list_tools.py --details
 node scripts/emit_wrapped_dsp.mjs --dsp t2.dsp
 scripts/verify_sse.py --url http://127.0.0.1:8000/sse
+scripts/test_ws_metrics.py --url ws://127.0.0.1:8787/ws --include-scope --include-spectrum
 ```
 
 ### stdio client

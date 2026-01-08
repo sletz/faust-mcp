@@ -38,6 +38,14 @@
    - Map IDs/classes referenced in `ui/rt-ui.js`.
    - Identify which elements can be wrapped or moved without breaking selectors.
    - Note which sections are dynamically created (e.g., Faust UI mount).
+   - Current bindings (must remain stable):
+     - IDs: `status`, `dsp-name`, `faust-ui-root`, `faust-ui-container`, `fallback-ui`,
+       `midi-panel`, `midi-select`, `midi-status`, `poly-active`, `compact-toggle`,
+       `scope-canvas`, `spectrum-canvas`, `scope-label`, `scope-meta`, `scope-channel`,
+       `probe-select`, `probe-canvas`, `probe-label`, `probe-meta`.
+     - Classes: `app-shell`, `app-header`, `app-main`, `panel`, `panel-faust`, `panel-scope`,
+       `panel-probe`, `right-column`, `scope-tab`, `scope-pane-scope`, `scope-pane-spectrum`.
+     - Faust UI mount point: `#faust-ui-root` (created by `/faust-ui/index.js`).
 2. **Define the CSS design system**
    - Add `:root` variables:
      - `--bg`, `--bg-2`, `--surface`, `--surface-2`, `--border`.
@@ -87,21 +95,50 @@
 
 Goal: replace high‑rate HTTP polling with a push channel for analysis data.
 
-1. **Server**
-   - Add a WebSocket endpoint in the Node UI server (e.g., `/ws`).
-   - Allow a JSON subscription message with toggles:
-     - `include_scope`, `include_spectrum`, `per_channel`, `probe_id`.
-   - Push `get_audio_metrics()` payloads at a server‑controlled rate (e.g., 5–10 fps).
-2. **Client**
-   - Add a lightweight WebSocket client in `ui/rt-ui.js`.
-   - Fall back to HTTP polling if WS fails.
-   - Use the same render paths as polling (no duplication).
-3. **Rate limiting**
-   - Separate rates for scope vs spectrum (spectrum slower).
-   - Optional per‑client rate cap.
-4. **Protocol**
-   - Keep payload format identical to `get_audio_metrics()`.
-   - Add `schema_version` to WS messages if needed for future compatibility.
+1. **Server endpoint placement**
+   - Prefer adding WS to the same HTTP server that serves `rt-ui` (currently `faust_realtime_server.py`).
+   - If a dedicated Node UI server exists in the future, reuse the same WS message format.
+2. **Server behavior**
+   - Add a `/ws` endpoint, local‑only by default (same origin).
+   - Accept a JSON `subscribe` message:
+     - `include_scope`, `include_spectrum`, `per_channel`, `probe_id`
+     - `scope_fps`, `spectrum_fps`, `probe_fps` (server clamps to safe max)
+   - Push analysis frames at server‑controlled rates (e.g., scope 5–10 fps, spectrum 1–2 fps).
+   - Include `schema_version`, `timestamp_ms`, and `source` (mix/channel) in each frame.
+3. **Client**
+   - Add a small WS client in `ui/rt-ui.js` with automatic reconnect.
+   - Fall back to HTTP polling if WS is unavailable.
+   - Reuse the same render pipeline as polling (single code path).
+4. **Rate limiting & backpressure**
+   - Separate rates per stream (scope vs spectrum vs probes).
+   - Drop frames if the UI is busy (avoid queue buildup).
+5. **Protocol shape (example)**
+   - Subscribe:
+     - `{ "type": "subscribe", "scope_fps": 8, "spectrum_fps": 2, "probe_id": 3 }`
+   - Frames:
+     - `{ "type": "metrics", "schema_version": 1, "timestamp_ms": 123456, "payload": { ...get_audio_metrics... } }`
+6. **Security**
+   - Same‑origin by default; optional token if exposed beyond localhost.
+7. **Testing**
+   - Add a minimal WS test script (e.g., `scripts/test_ws_metrics.py`).
+   - Validate fallbacks by disabling WS and confirming polling still works.
+
+### Recommended Defaults
+
+- `scope_fps`: 8 (cap at 12)
+- `spectrum_fps`: 2 (cap at 4)
+- `probe_fps`: 2 (cap at 4)
+- Backpressure policy: drop newest if render queue > 1 (keep UI stable)
+- Max payload size: keep FFT bins under 2048 when spectrum enabled
+
+### Sequence Sketch
+
+```
+rt-ui.js  ->  /ws (subscribe)
+server    ->  get_audio_metrics()
+server    ->  /ws (metrics frame)
+rt-ui.js  ->  render scope/spectrum/probe
+```
 
 ## Deliverables
 

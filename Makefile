@@ -21,7 +21,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-set-param rt-stop rt-midi-list rt-midi-select stop-rt
+.PHONY: help setup setup-rt setup-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt
 
 help:
 	@printf "Targets:\n"
@@ -58,6 +58,7 @@ help:
 	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
 	@printf "  rt-midi-list  List MIDI inputs from the UI server\n"
 	@printf "  rt-midi-select Select a MIDI input (RT_MIDI_INDEX)\n"
+	@printf "  rt-ws-metrics Test WebSocket metrics stream\n"
 	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
 	@printf "  MCP_HOST=%s\n" "$(MCP_HOST)"
@@ -203,6 +204,9 @@ rt-midi-select:
 	curl -s -X POST http://127.0.0.1:$(FAUST_UI_PORT)/midi/select \
 		-H 'Content-Type: application/json' \
 		-d '{"index":$(RT_MIDI_INDEX)}'
+
+rt-ws-metrics:
+	./scripts/test_ws_metrics.py --url ws://127.0.0.1:$(FAUST_UI_PORT)/ws --include-scope --include-spectrum
 
 rt-stop:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop

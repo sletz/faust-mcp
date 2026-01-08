@@ -13,9 +13,9 @@ class RtUiApp {
     this.paramPollMs = options.paramPollMs || 200;
     this.midiPollMs = options.midiPollMs || 2000;
     this.dspPollMs = options.dspPollMs || 500;
-    this.scopePollMs = options.scopePollMs || 400;
-    this.spectrumPollMs = options.spectrumPollMs || 1200;
-    this.probePollMs = options.probePollMs || 800;
+    this.scopePollMs = options.scopePollMs || 200;
+    this.spectrumPollMs = options.spectrumPollMs || 400;
+    this.probePollMs = options.probePollMs || 400;
     // Output scope/spectrum state.
     this.scopeMode = 'scope';
     this.scopeChannel = 'mix';
@@ -27,6 +27,10 @@ class RtUiApp {
     this.lastJsonSignature = null;
     this.faustUiInstance = null;
     this.faustUiLayout = null;
+    this.ws = null;
+    this.wsConnected = false;
+    this.wsRetryMs = 2000;
+    this.wsRetryTimer = null;
     this.fallbackControls = new Map();
     this.dom = {
       appShell: document.querySelector('.app-shell'),
@@ -217,6 +221,171 @@ class RtUiApp {
     const res = await fetch(`/audio-metrics?${query.toString()}`);
     if (!res.ok) return null;
     return res.json();
+  }
+
+  // Build a WebSocket URL for metrics streaming.
+  buildWsUrl() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws`;
+  }
+
+  // Build the current subscription payload for WebSocket streaming.
+  buildWsConfig() {
+    const includeScope = this.scopeMode === 'scope' || this.scopeMode === 'both';
+    const includeSpectrum = this.scopeMode === 'spectrum' || this.scopeMode === 'both';
+    const perChannel = this.scopeChannel !== 'mix';
+    const scopeFps = includeScope ? Math.max(1, Math.round(1000 / this.scopePollMs)) : 0;
+    const spectrumFps = includeSpectrum ? Math.max(1, Math.round(1000 / this.spectrumPollMs)) : 0;
+    const probeFps = this.dom.probeSelect?.value
+      ? Math.max(1, Math.round(1000 / this.probePollMs))
+      : 0;
+    const probeId = this.dom.probeSelect?.value ? Number(this.dom.probeSelect.value) : null;
+    const payload = {
+      type: 'subscribe',
+      include_scope: includeScope,
+      include_spectrum: includeSpectrum,
+      per_channel: perChannel,
+      scope_fps: scopeFps,
+      spectrum_fps: spectrumFps,
+      probe_fps: probeFps,
+      fft_size: 1024,
+      smoothing: 0.8,
+      min_db: -90,
+      max_db: 0,
+      edge_threshold: 0.09,
+      log_bins: 32,
+    };
+    if (Number.isFinite(probeId)) {
+      payload.probe_id = probeId;
+    }
+    return payload;
+  }
+
+  // Start a WebSocket stream for analysis data.
+  startWebSocket() {
+    if (typeof WebSocket === 'undefined') return;
+    const url = this.buildWsUrl();
+    try {
+      this.ws = new WebSocket(url);
+    } catch (_) {
+      return;
+    }
+    this.ws.addEventListener('open', () => {
+      this.wsConnected = true;
+      this.sendWsSubscribe();
+    });
+    this.ws.addEventListener('message', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data?.type === 'metrics') {
+          this.applyMetricsPayload(data.payload || {}, {
+            includeScope: true,
+            includeSpectrum: true,
+          });
+        }
+      } catch (_) {}
+    });
+    this.ws.addEventListener('close', () => {
+      this.wsConnected = false;
+      this.scheduleWsReconnect();
+    });
+    this.ws.addEventListener('error', () => {
+      this.wsConnected = false;
+      try {
+        this.ws?.close();
+      } catch (_) {}
+    });
+  }
+
+  // Retry WebSocket connection after a delay.
+  scheduleWsReconnect() {
+    if (this.wsRetryTimer) return;
+    this.wsRetryTimer = window.setTimeout(() => {
+      this.wsRetryTimer = null;
+      this.startWebSocket();
+    }, this.wsRetryMs);
+  }
+
+  // Send the current subscription to the WebSocket.
+  sendWsSubscribe() {
+    if (!this.wsConnected || !this.ws) return;
+    try {
+      this.ws.send(JSON.stringify(this.buildWsConfig()));
+    } catch (_) {}
+  }
+
+  // Update probe history and scope/spectrum from a metrics payload.
+  applyMetricsPayload(metrics, { includeScope, includeSpectrum } = {}) {
+    if (!metrics) return;
+    if (metrics.probes) {
+      this.updateProbeOptions(metrics.probes);
+    }
+    this.updateProbeSeriesFromMetrics(metrics);
+    const channelCount = metrics.output?.channels?.length
+      ?? metrics.scope?.channels?.length
+      ?? metrics.spectrum?.channels?.length
+      ?? 0;
+    if (channelCount > 0 && channelCount !== this.scopeChannelCount) {
+      this.updateScopeChannelOptions(channelCount);
+    }
+    const channelIndex = this.scopeChannel === 'mix' ? null : Number(this.scopeChannel);
+    const shouldRenderScope = includeScope ?? !!metrics.scope;
+    const shouldRenderSpectrum = includeSpectrum ?? !!metrics.spectrum;
+    let renderedScope = false;
+    let renderedSpectrum = false;
+    if (shouldRenderScope && metrics.scope) {
+      const scopePayload = Number.isFinite(channelIndex) && metrics.scope.channels
+        ? metrics.scope.channels[channelIndex]
+        : metrics.scope;
+      if (scopePayload?.samples?.length) {
+        this.renderScope(scopePayload);
+        renderedScope = true;
+        if (this.dom.scopeMeta) {
+          const label = Number.isFinite(channelIndex) ? `Ch ${channelIndex + 1}` : 'Mix';
+          this.dom.scopeMeta.textContent = `${label} · Samples ${scopePayload.samples.length}`;
+        }
+      }
+    }
+    if (shouldRenderSpectrum && metrics.spectrum) {
+      const spectrumPayload = Number.isFinite(channelIndex) && metrics.spectrum.channels
+        ? metrics.spectrum.channels[channelIndex]
+        : metrics.spectrum;
+      if (spectrumPayload) {
+        this.renderSpectrum(spectrumPayload);
+        renderedSpectrum = true;
+        if (this.dom.scopeMeta) {
+          const fft = spectrumPayload.fft_size || 2048;
+          const smoothing = spectrumPayload.smoothing ?? 0;
+          const label = Number.isFinite(channelIndex) ? `Ch ${channelIndex + 1}` : 'Mix';
+          this.dom.scopeMeta.textContent = `${label} · FFT ${fft} · Smoothing ${smoothing}`;
+        }
+      }
+    }
+    if (this.dom.scopeLabel) {
+      if (renderedScope || renderedSpectrum) {
+        this.dom.scopeLabel.textContent = '';
+      } else if (shouldRenderScope || shouldRenderSpectrum) {
+        this.dom.scopeLabel.textContent = 'Waiting for analyser data...';
+      }
+    }
+  }
+
+  // Append the selected probe value from a metrics payload.
+  updateProbeSeriesFromMetrics(metrics) {
+    const selected = this.dom.probeSelect?.value;
+    if (!selected || !metrics?.probes) return;
+    const id = Number(selected);
+    const probe = metrics.probes.find((entry) => entry.id === id);
+    if (!probe) return;
+    const value = Number(probe.value);
+    if (!Number.isFinite(value)) return;
+    this.probeSeries.push(value);
+    if (this.probeSeries.length > this.probeMaxPoints) {
+      this.probeSeries.shift();
+    }
+    if (this.dom.probeLabel) this.dom.probeLabel.textContent = `Probe ${id}`;
+    if (this.dom.probeMeta) this.dom.probeMeta.textContent = `Value: ${value.toFixed(4)}`;
+    this.renderProbeScope();
   }
 
   // Update probe selector from get_audio_metrics().probes.
@@ -524,6 +693,7 @@ class RtUiApp {
 
   // Update scope/spectrum UI based on the selected mode.
   async refreshScopeData() {
+    if (this.wsConnected) return;
     const includeScope = this.scopeMode === 'scope' || this.scopeMode === 'both';
     const includeSpectrum = this.scopeMode === 'spectrum' || this.scopeMode === 'both';
     const perChannel = this.scopeChannel !== 'mix';
@@ -546,50 +716,10 @@ class RtUiApp {
       log_bins: includeSpectrumNow ? '32' : undefined,
     });
     if (!metrics) return;
-    if (metrics.probes) {
-      this.updateProbeOptions(metrics.probes);
-    }
-    const channelCount = metrics.output?.channels?.length
-      ?? metrics.scope?.channels?.length
-      ?? metrics.spectrum?.channels?.length
-      ?? 0;
-    if (channelCount > 0 && channelCount !== this.scopeChannelCount) {
-      this.updateScopeChannelOptions(channelCount);
-    }
-    const channelIndex = this.scopeChannel === 'mix' ? null : Number(this.scopeChannel);
-    let renderedScope = false;
-    let renderedSpectrum = false;
-    if (includeScope && metrics.scope) {
-      const scopePayload = Number.isFinite(channelIndex) && metrics.scope.channels
-        ? metrics.scope.channels[channelIndex]
-        : metrics.scope;
-      this.renderScope(scopePayload);
-      renderedScope = true;
-      if (this.dom.scopeLabel) this.dom.scopeLabel.textContent = '';
-      if (this.dom.scopeMeta) {
-        const label = Number.isFinite(channelIndex) ? `Ch ${channelIndex + 1}` : 'Mix';
-        this.dom.scopeMeta.textContent = `${label} · Samples ${scopePayload.samples.length}`;
-      }
-      if (!includeSpectrum) return;
-    }
-    if (includeSpectrumNow && metrics.spectrum) {
-      const spectrumPayload = Number.isFinite(channelIndex) && metrics.spectrum.channels
-        ? metrics.spectrum.channels[channelIndex]
-        : metrics.spectrum;
-      this.renderSpectrum(spectrumPayload);
-      renderedSpectrum = true;
-      if (this.dom.scopeLabel) this.dom.scopeLabel.textContent = '';
-      if (this.dom.scopeMeta) {
-        const fft = spectrumPayload.fft_size || 2048;
-        const smoothing = spectrumPayload.smoothing ?? 0;
-        const label = Number.isFinite(channelIndex) ? `Ch ${channelIndex + 1}` : 'Mix';
-        this.dom.scopeMeta.textContent = `${label} · FFT ${fft} · Smoothing ${smoothing}`;
-      }
-      if (!includeScope) return;
-    }
-    if (this.dom.scopeLabel && !renderedScope && !renderedSpectrum) {
-      this.dom.scopeLabel.textContent = 'Waiting for analyser data...';
-    }
+    this.applyMetricsPayload(metrics, {
+      includeScope,
+      includeSpectrum: includeSpectrumNow,
+    });
   }
 
   // Handle scope/spectrum tab selection.
@@ -621,6 +751,7 @@ class RtUiApp {
         if (this.dom.scopeLabel) {
           this.dom.scopeLabel.textContent = 'Waiting for analyser data...';
         }
+        this.sendWsSubscribe();
         this.refreshScopeData();
       });
     });
@@ -635,6 +766,7 @@ class RtUiApp {
       if (this.dom.scopeLabel) {
         this.dom.scopeLabel.textContent = 'Waiting for analyser data...';
       }
+      this.sendWsSubscribe();
       this.refreshScopeData();
     });
   }
@@ -651,27 +783,19 @@ class RtUiApp {
       if (this.dom.probeMeta) {
         this.dom.probeMeta.textContent = 'Value: --';
       }
+      this.sendWsSubscribe();
     });
   }
 
   // Poll probe values and update the rolling scope (low rate to avoid UI churn).
   async refreshProbeData() {
+    if (this.wsConnected) return;
     const selected = this.dom.probeSelect?.value;
     if (!selected) return;
     const metrics = await this.fetchAudioMetrics({});
     if (!metrics?.probes) return;
-    const id = Number(selected);
-    const probe = metrics.probes.find((entry) => entry.id === id);
-    if (!probe) return;
-    const value = Number(probe.value);
-    if (!Number.isFinite(value)) return;
-    this.probeSeries.push(value);
-    if (this.probeSeries.length > this.probeMaxPoints) {
-      this.probeSeries.shift();
-    }
-    if (this.dom.probeLabel) this.dom.probeLabel.textContent = `Probe ${id}`;
-    if (this.dom.probeMeta) this.dom.probeMeta.textContent = `Value: ${value.toFixed(4)}`;
-    this.renderProbeScope();
+    this.updateProbeOptions(metrics.probes);
+    this.updateProbeSeriesFromMetrics(metrics);
   }
 
   // Create and mount the Faust UI bundle if available.
@@ -779,6 +903,7 @@ class RtUiApp {
     this.setupScopeChannel();
     this.setupProbeSelect();
     this.setupMidiSelect();
+    this.startWebSocket();
     await this.refreshMidiInputs();
     this.lastJsonSignature = await this.renderOnce();
     this.startPolling();
