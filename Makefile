@@ -13,6 +13,7 @@ INPUT_SOURCE ?=
 INPUT_FREQ ?=
 INPUT_FILE ?=
 HIDE_METERS ?= 0
+RT_MIDI_INDEX ?= 0
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
 DD_RENDER_SECONDS ?= 2.0
@@ -20,13 +21,14 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-set-param rt-stop stop-rt
+.PHONY: help setup setup-rt setup-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-set-param rt-stop rt-midi-list rt-midi-select stop-rt
 
 help:
 	@printf "Targets:\n"
 	@printf "  setup        Create tmp/ and install Python deps\n"
 	@printf "  setup-rt     Install node-web-audio-api deps and build native module\n"
 	@printf "  setup-ui     Install @shren/faust-ui in this repo\n"
+	@printf "  setup-midi   Init node-midi submodule and install native deps\n"
 	@printf "  clean        Remove tmp/ and server logs\n"
 	@printf "  smoke-test   Run a basic stdio test against both servers\n"
 	@printf "  run-sse      Start the MCP server over SSE\n"
@@ -54,6 +56,8 @@ help:
 	@printf "  rt-get-audio-metrics-full Get scope + spectrum metrics\n"
 	@printf "  rt-get-audio-metrics-full-per-channel Get scope + spectrum per channel\n"
 	@printf "  rt-set-param  Set a param on real-time server (RT_PARAM_PATH/RT_PARAM_VALUE)\n"
+	@printf "  rt-midi-list  List MIDI inputs from the UI server\n"
+	@printf "  rt-midi-select Select a MIDI input (RT_MIDI_INDEX)\n"
 	@printf "  rt-stop       Stop real-time DSP\n"
 	@printf "\nVars:\n"
 	@printf "  MCP_HOST=%s\n" "$(MCP_HOST)"
@@ -76,6 +80,7 @@ help:
 	@printf "  INPUT_FREQ=%s\n" "$(INPUT_FREQ)"
 	@printf "  INPUT_FILE=%s\n" "$(INPUT_FILE)"
 	@printf "  HIDE_METERS=%s\n" "$(HIDE_METERS)"
+	@printf "  RT_MIDI_INDEX=%s\n" "$(RT_MIDI_INDEX)"
 
 setup:
 	@mkdir -p $(TMPDIR)
@@ -87,6 +92,10 @@ setup-rt:
 
 setup-ui:
 	cd ui && npm install
+
+setup-midi:
+	git submodule update --init --recursive external/node-midi 
+	cd external/node-midi && npm install && npm run build:ts
 
 clean:
 	rm -rf $(TMPDIR) faust_server.log faust_server_sse.log __pycache__
@@ -186,6 +195,14 @@ rt-get-audio-metrics-full-per-channel:
 
 rt-set-param:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool set_param --param-path $(RT_PARAM_PATH) --param-value $(RT_PARAM_VALUE)
+
+rt-midi-list:
+	curl -s http://127.0.0.1:$(FAUST_UI_PORT)/midi/inputs
+
+rt-midi-select:
+	curl -s -X POST http://127.0.0.1:$(FAUST_UI_PORT)/midi/select \
+		-H 'Content-Type: application/json' \
+		-d '{"index":$(RT_MIDI_INDEX)}'
 
 rt-stop:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop

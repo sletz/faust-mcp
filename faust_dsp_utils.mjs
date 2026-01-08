@@ -14,6 +14,15 @@
 export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideMeters) {
   const source = (inputSource || 'none').trim().toLowerCase();
   const hiddenTag = hideMeters ? '[hidden:1]' : '';
+  const rawCode = String(dspCode);
+  const strippedCode = rawCode
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '');
+  const hasEffect = /(^|\n)\s*effect\s*=/.test(strippedCode);
+  const nvoicesMatch = strippedCode.match(/\[nvoices\s*:\s*(\d+)\]/i);
+  // Only meter via `effect` when polyphony is explicitly requested.
+  const useEffectMeters = hasEffect && nvoicesMatch && Number(nvoicesMatch[1]) > 0;
+  const indentLine = (line) => (line.trim() ? `  ${line}` : line);
 
   // Shared meter definitions to keep wrapper variants in sync.
   const buildMeteringDefs = (includeInputMeters) => {
@@ -32,35 +41,68 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
     }
     defs.push(
       '// Output meters',
+      '// Metering paths:',
+      '//   FX -> per-channel Peak/RMS meters (attach, no signal change)',
+      '//   FX -> mono mix (sum) -> Mix Peak/RMS meters (attach)',
+      '//   FX -> mix tap (attach) -> per-channel meters => same output arity',
+      '//',
+      '// ASCII flow (n channels):',
+      '//   FX --+--> per-channel meters (n) ----+',
+      '//        |                                |',
+      '//        +--> sum-to-mono -> mix meters ---+',
+      '//        |                                |',
+      '//        +--> output signal ---------------+',
       `mcp_out_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[0]Peak/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
       `mcp_out_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[1]RMS/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
       'mcp_out_meter(i) = mcp_out_peak(i) : mcp_out_rms(i);',
       `mcp_out_mix_peak = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[2]Mix Peak${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
       `mcp_out_mix_rms = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[99]Output Meters/[3]Mix RMS${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
       'mcp_out_mix_meter = mcp_out_mix_peak : mcp_out_mix_rms;',
-      'mcp_out_mix_signal(FX) = par(i, outputs(FX), _) :> _;',
-      'mcp_output_meters(FX) = par(i, outputs(FX), mcp_out_meter(i)), (mcp_out_mix_signal(FX) : mcp_out_mix_meter);',
+      '// Sum N outputs to mono without changing arity upstream.',
+      'mcp_out_mix_signal_n(n) = par(i, n, _) :> _;',
+      'mcp_out_mix_signal(FX) = mcp_out_mix_signal_n(outputs(FX));',
+      '// Attach mix meters without adding outputs (tap-only).',
+      'mcp_out_mix_tap_n(1) = _ <: (_, (mcp_out_mix_signal_n(1) : mcp_out_mix_meter)) : attach;',
+      'mcp_out_mix_tap_n(n) = si.bus(n) <: (si.bus(n), (mcp_out_mix_signal_n(n) : mcp_out_mix_meter)) : (si.bus(n-1), attach);',
+      'mcp_out_mix_tap(FX) = mcp_out_mix_tap_n(outputs(FX));',
+      '// Per-channel meters only (no mix meters, no arity change).',
+      'mcp_output_meters_nomix(FX) = par(i, outputs(FX), mcp_out_meter(i));',
+      '// Per-channel meters + mix meters (adds one extra output).',
+      'mcp_output_meters(FX) = mcp_output_meters_nomix(FX), (mcp_out_mix_signal(FX) : mcp_out_mix_meter);',
+      '// Per-channel meters + mix meters (tap) with unchanged output count.',
+      'mcp_output_meters_tap(FX) = mcp_out_mix_tap(FX) : mcp_output_meters_nomix(FX);',
       '',
     );
     return defs;
   };
   if (source === 'none') {
-    const indented = String(dspCode)
-      .split('\n')
-      .map((line) => (line.trim() ? `  ${line}` : line))
-      .join('\n');
-
     const meteringDefs = buildMeteringDefs(false);
+    const meteringDefsIndented = meteringDefs.map(indentLine);
+    const indented = rawCode
+      .split('\n')
+      .map(indentLine)
+      .join('\n');
 
     const wrappedCode = [
       'import("stdfaust.lib");',
       '',
-      ...meteringDefs,
       '// User DSP',
       'mcp_dsp = environment {',
+      ...meteringDefsIndented,
+      '  // User DSP',
       indented,
       '};',
-      'process = mcp_dsp.process <: mcp_output_meters(mcp_dsp.process);',
+      ...(hasEffect
+        ? useEffectMeters
+          ? [
+            'process = mcp_dsp.process;',
+            'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
+          ]
+          : [
+            'process = mcp_dsp.process <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+            'effect = mcp_dsp.effect;',
+          ]
+        : ['process = mcp_dsp.process <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: false };
@@ -75,13 +117,13 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
       throw new Error('input_file is required for input_source=file');
     }
 
-    const indented = String(dspCode)
-      .split('\n')
-      .map((line) => (line.trim() ? `  ${line}` : line))
-      .join('\n');
-
     // Adaptive metering for N inputs/outputs
     const meteringDefs = buildMeteringDefs(true);
+    const meteringDefsIndented = meteringDefs.map(indentLine);
+    const indented = rawCode
+      .split('\n')
+      .map(indentLine)
+      .join('\n');
 
     // HTTP/HTTPS URLs: use FAUST soundfile (works with fetch)
     if (inputFile.startsWith('http://') || inputFile.startsWith('https://')) {
@@ -90,15 +132,26 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
       const wrappedCode = [
         'import("stdfaust.lib");',
         '',
-        ...meteringDefs,
         'mcp_so = library("soundfiles.lib");',
         `mcp_sf = soundfile("sound[url:{'${escaped}'}]", 1);`,
         'mcp_play = mcp_so.soundfile_play(mcp_sf);',
         '// User DSP',
         'mcp_dsp = environment {',
+        ...meteringDefsIndented,
+        '  // User DSP',
         indented,
         '};',
-        'process = mcp_play <: mcp_input_meters(mcp_dsp.process) : mcp_output_meters(mcp_dsp.process);',
+        ...(hasEffect
+          ? useEffectMeters
+            ? [
+              'process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process);',
+              'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
+            ]
+            : [
+              'process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+              'effect = mcp_dsp.effect;',
+            ]
+          : ['process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
       ].join('\n');
 
       return { code: wrappedCode, useExternalInput: false };
@@ -107,12 +160,23 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
     const wrappedCode = [
       'import("stdfaust.lib");',
       '',
-      ...meteringDefs,
       '// User DSP',
       'mcp_dsp = environment {',
+      ...meteringDefsIndented,
+      '  // User DSP',
       indented,
       '};',
-      'process = _ <: mcp_input_meters(mcp_dsp.process) : mcp_output_meters(mcp_dsp.process);',
+      ...(hasEffect
+        ? useEffectMeters
+          ? [
+            'process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process);',
+            'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
+          ]
+          : [
+            'process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+            'effect = mcp_dsp.effect;',
+          ]
+        : ['process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: true, inputFile };
@@ -122,23 +186,34 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
     ? `os.osc(${inputFreq || 440})`
     : 'no.noise';
 
-  const indented = String(dspCode)
-    .split('\n')
-    .map((line) => (line.trim() ? `  ${line}` : line))
-    .join('\n');
-
   const meteringDefs = buildMeteringDefs(true);
+  const meteringDefsIndented = meteringDefs.map(indentLine);
+  const indented = rawCode
+    .split('\n')
+    .map(indentLine)
+    .join('\n');
 
   const wrappedCode = [
     'import("stdfaust.lib");',
     '',
-    ...meteringDefs,
     '// User DSP',
     'mcp_dsp = environment {',
+    ...meteringDefsIndented,
+    '  // User DSP',
     indented,
     '};',
     `mcp_input = ${inputSignal};`,
-    'process = mcp_input <: mcp_input_meters(mcp_dsp.process) : mcp_output_meters(mcp_dsp.process);',
+    ...(hasEffect
+      ? useEffectMeters
+        ? [
+          'process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process);',
+          'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
+        ]
+        : [
+          'process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+          'effect = mcp_dsp.effect;',
+        ]
+      : ['process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
@@ -237,6 +312,35 @@ export function extractParamsFromJson(jsonObj) {
   const params = [];
   collectParams(jsonObj?.ui || [], params);
   return params;
+}
+
+/**
+ * Extract MIDI enablement and polyphony voice count from Faust metadata.
+ * @param {Array<object>|undefined|null} meta
+ * @returns {{midiEnabled: boolean, nvoices: number}}
+ */
+export function extractMidiAndNvoices(meta) {
+  let midiEnabled = false;
+  let nvoices = 0;
+  if (!Array.isArray(meta)) return { midiEnabled, nvoices };
+
+  for (const entry of meta) {
+    if (!entry || typeof entry !== 'object') continue;
+    for (const [key, value] of Object.entries(entry)) {
+      if (key !== 'options') continue;
+      const options = String(value);
+      const midiMatch = options.match(/\[midi:(on|off)\]/i);
+      if (midiMatch) {
+        midiEnabled = midiMatch[1].toLowerCase() === 'on';
+      }
+      const nvoicesMatch = options.match(/\[nvoices:(\d+)\]/i);
+      if (nvoicesMatch) {
+        nvoices = Number.parseInt(nvoicesMatch[1], 10) || 0;
+      }
+    }
+  }
+
+  return { midiEnabled, nvoices };
 }
 
 /**

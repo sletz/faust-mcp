@@ -9,9 +9,11 @@ Tools:
   - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
   - check_syntax(faust_code, name?)
   - get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)
+  - get_midi_inputs()
   - get_params()
   - get_param(path)
   - get_param_values()
+  - select_midi_input(index?, name?)
   - set_param(path, value)
   - stop()
 
@@ -236,6 +238,22 @@ def get_audio_metrics(
         "log_bins": log_bins,
     }
     result = worker.request("get_audio_metrics", params)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_midi_inputs() -> str:
+    """List available MIDI input devices (Node backend)."""
+
+    result = worker.request("get_midi_inputs")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def select_midi_input(index: int | None = None, name: str | None = None) -> str:
+    """Select a MIDI input device by index or name (Node backend)."""
+
+    result = worker.request("select_midi_input", {"index": index, "name": name})
     return json.dumps(result, indent=2)
 
 

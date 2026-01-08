@@ -52,7 +52,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `get_midi_inputs`, `select_midi_input`, `stop`.
 - Offline tools: `compile_and_analyze`.
 - DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
@@ -68,6 +68,12 @@ Real-time setup:
 ```bash
 make setup-rt
 ```
+
+MIDI input (Node backend):
+
+- Use `get_midi_inputs` to list available inputs.
+- Use `select_midi_input` with `index` or `name` to choose a single active device.
+- Selection is session-only (no persistence across restarts).
 
 Faust UI setup (optional):
 
@@ -346,6 +352,7 @@ npm run build
 - `npm run build` generates `node-web-audio-api.build-release.node` and should be re-run
   if you update the submodule or switch branches.
 - If you get no sound, check OS audio permissions and the default output device.
+- Set `FAUST_MIDI_DEBUG=1` to log raw MIDI messages and note-on/off counters (stderr).
 
 ### Run (SSE)
 
@@ -380,6 +387,8 @@ Endpoints used by the UI:
 The page polls `/json` and `/status` to detect DSP changes, and polls
 `/param-values` on a short interval (≈1.5s in `rt-ui.html`) to keep the UI
 in sync with parameter updates coming from MCP (`set_param`).
+For polyphonic DSPs, the UI also shows the current count of active voices
+just below the MIDI device selector.
 
 ```bash
 WEBAUDIO_ROOT=external/node-web-audio-api \
@@ -410,6 +419,8 @@ Then open:
 - `get_param(path)`
 - `get_param_values()`
 - `get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)`
+- `get_midi_inputs()`
+- `select_midi_input(index?, name?)`
 - `set_param_values(values)`
 - `set_param(path, value)`
 - `stop()`
@@ -428,6 +439,9 @@ If you want to hide the meters in compatible UIs, pass `hide_meters=true` to
 Metering/probe bargraphs are added via `attach`, so they do **not** change the
 DSP audio I/O count. The compiled DSP keeps the same number of inputs/outputs;
 only UI bargraphs are appended for metering/probing.
+When a polyphonic DSP defines `effect`, the wrapper re-exports it at top level
+so faustwasm can apply it post-mix. In that mode, mix meters are attached via
+an in-place tap so output arity stays unchanged.
 
 When a bargraph includes `[unit:dB]` metadata, `get_audio_metrics()` converts its
 value to linear amplitude before returning it. The conversion is
@@ -544,6 +558,23 @@ gain = hslider("gain[dB]", -6, -60, 6, 0.1) : ba.db2linear;
 process = no.noise * gain;
 ```
 
+`organ_poly.dsp` (polyphonic organ):
+
+```faust
+import("stdfaust.lib");
+declare options "[midi:on][nvoices:8]";
+process = os.osc(440) <: _,_;
+```
+
+`poly_fx.dsp` (polyphonic voices + global effect):
+
+```faust
+import("stdfaust.lib");
+declare options "[midi:on][nvoices:8]";
+process = os.osc(440) <: _,_;
+effect = _,_ : + : fi.lowpass(2, 8000) : ef.reverb_mono(0.3, 0.5, 0.5, 1) <: _,_;
+```
+
 `probe.dsp`:
 
 ```faust
@@ -573,6 +604,15 @@ shaped = osc * en.adsr(0.01, 0.1, 0.7, 0.3, gate) : probe_rms_db(1, 0);
 output = shaped * gain : probe_rms_db(2, 0);
 
 process = output <: _,_;
+```
+
+### DSP wrapper utility
+
+To inspect the Faust code that the real-time server generates (metering + test inputs),
+use `scripts/emit_wrapped_dsp.mjs`:
+
+```bash
+node scripts/emit_wrapped_dsp.mjs --dsp poly_fx.dsp --out poly_fx_wrapped.dsp
 ```
 
 ## Clients

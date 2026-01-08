@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import {
   extractBargraphProbes,
   extractBargraphUnits,
+  extractMidiAndNvoices,
   extractParamsFromJson,
   wrapTestInputs,
 } from './faust_dsp_utils.mjs';
@@ -46,6 +47,8 @@ class WorkerContext {
     this.webAudioRoot = env.WEBAUDIO_ROOT || 'external/node-web-audio-api';
     this.uiPort = Number(env.FAUST_UI_PORT || 0);
     this.uiRoot = env.FAUST_UI_ROOT || '';
+    this.midiDebug = String(env.FAUST_MIDI_DEBUG || '').toLowerCase() === '1'
+      || String(env.FAUST_MIDI_DEBUG || '').toLowerCase() === 'true';
 
     if (!globalThis.Blob) {
       globalThis.Blob = Blob;
@@ -82,6 +85,7 @@ class FaustCompilerManager {
     this.AudioContext = null;
     this.AudioWorkletNode = null;
     this.FaustMonoDspGenerator = null;
+    this.FaustPolyDspGenerator = null;
   }
 
   /**
@@ -101,9 +105,11 @@ class FaustCompilerManager {
       LibFaust,
       FaustCompiler,
       FaustMonoDspGenerator,
+      FaustPolyDspGenerator,
     } = await import(this.context.faustModuleEntry);
 
     this.FaustMonoDspGenerator = FaustMonoDspGenerator;
+    this.FaustPolyDspGenerator = FaustPolyDspGenerator;
 
     const faustModule = await instantiateFaustModuleFromFile(
       path.join(this.context.faustWasmRoot, 'libfaust-wasm/libfaust-wasm.js'),
@@ -125,6 +131,17 @@ class FaustCompilerManager {
       throw new Error('Faust compiler is not initialized yet');
     }
     return new this.FaustMonoDspGenerator();
+  }
+
+  /**
+   * Create a Faust polyphonic DSP generator for the current compiler.
+   * @returns {object}
+   */
+  createPolyGenerator() {
+    if (!this.FaustPolyDspGenerator) {
+      throw new Error('Faust compiler is not initialized yet');
+    }
+    return new this.FaustPolyDspGenerator();
   }
 
   /**
@@ -378,9 +395,12 @@ class WorkerRuntime {
     this.faustNode = null;
     this.faustJson = null;
     this.paramsCache = [];
+    this.inputParamsCache = {};
     this.outputParamsCache = {};
     this.meterUnitsByPath = {};
     this.meterProbesByPath = {};
+    this.polyNvoices = 0;
+    this.midiEnabled = false;
     this.dspName = null;
     this.fileSourceNode = null;
     this.metricsCollector.reset();
@@ -432,12 +452,14 @@ class WorkerRuntime {
     this.meterProbesByPath = {};
     this.faustJson = null;
     this.dspName = null;
+    this.polyNvoices = 0;
+    this.midiEnabled = false;
 
     const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
     const AudioContext = this.compilerManager.AudioContext;
     this.audioContext = new AudioContext({ latencyHint: hint });
 
-    const generator = this.compilerManager.createGenerator();
+    const monoGenerator = this.compilerManager.createGenerator();
     const wrapped = wrapTestInputs(
       dsp_code,
       input_source,
@@ -445,23 +467,53 @@ class WorkerRuntime {
       input_file,
       hide_meters,
     );
-    const compiled = await generator.compile(
+    const compiledMono = await monoGenerator.compile(
       this.compilerManager.compiler,
       name,
       wrapped.code,
       '-ftz 2',
     );
-    if (!compiled) {
+    if (!compiledMono) {
       throw new Error('Faust compilation failed');
     }
 
-    this.faustNode = await generator.createNode(this.audioContext);
+    let metaJson = null;
+    try {
+      metaJson = JSON.parse(monoGenerator.factory?.json || '{}');
+    } catch (_) {
+      metaJson = null;
+    }
+    const { midiEnabled, nvoices } = extractMidiAndNvoices(metaJson?.meta);
+    this.midiEnabled = midiEnabled;
+    this.polyNvoices = nvoices > 0 ? nvoices : 0;
+
+    if (this.polyNvoices > 0) {
+      const polyGenerator = this.compilerManager.createPolyGenerator();
+      const compiledPoly = await polyGenerator.compile(
+        this.compilerManager.compiler,
+        name,
+        wrapped.code,
+        '-ftz 2',
+      );
+      if (!compiledPoly) {
+        throw new Error('Faust poly compilation failed');
+      }
+      this.faustNode = await polyGenerator.createNode(
+        this.audioContext,
+        this.polyNvoices,
+        name,
+      );
+    } else {
+      this.faustNode = await monoGenerator.createNode(this.audioContext);
+    }
+
     if (!this.faustNode) {
       throw new Error('Failed to create Faust node');
     }
 
     // Register handler for output parameters (bargraphs).
     this.outputParamsCache = {};
+    this.inputParamsCache = {};
     this.metricsCollector.setMeterCaches({
       outputParamsCache: this.outputParamsCache,
       meterUnitsByPath: this.meterUnitsByPath,
@@ -470,6 +522,12 @@ class WorkerRuntime {
     if (typeof this.faustNode.setOutputParamHandler === 'function') {
       this.faustNode.setOutputParamHandler((path, value) => {
         this.outputParamsCache[path] = value;
+      });
+    }
+
+    if (typeof this.faustNode.setInputParamHandler === 'function') {
+      this.faustNode.setInputParamHandler((path, value) => {
+        this.inputParamsCache[path] = value;
       });
     }
 
@@ -581,7 +639,9 @@ class WorkerRuntime {
    */
   getParam({ path }) {
     this.ensureRunning();
-    const current = this.faustNode.getParamValue(path);
+    const current = Object.prototype.hasOwnProperty.call(this.inputParamsCache, path)
+      ? this.inputParamsCache[path]
+      : this.faustNode.getParamValue(path);
     return { status: 'ok', path, value: current };
   }
 
@@ -603,17 +663,32 @@ class WorkerRuntime {
     const paramPaths = this.getParamPaths();
     const values = paramPaths.map((path) => ({
       path,
-      value: this.faustNode.getParamValue(path),
+      value: Object.prototype.hasOwnProperty.call(this.inputParamsCache, path)
+        ? this.inputParamsCache[path]
+        : this.faustNode.getParamValue(path),
     }));
 
     for (const [path, value] of Object.entries(this.outputParamsCache)) {
-      if (!values.some((v) => v.path === path)) {
+      const existing = values.find((v) => v.path === path);
+      if (existing) {
+        existing.value = value;
+      } else {
+        values.push({ path, value });
+      }
+    }
+
+    for (const [path, value] of Object.entries(this.inputParamsCache)) {
+      const existing = values.find((v) => v.path === path);
+      if (existing) {
+        existing.value = value;
+      } else {
         values.push({ path, value });
       }
     }
 
     return { status: 'ok', values };
   }
+
 
   /**
    * Set multiple parameter values on the running DSP.
@@ -655,6 +730,7 @@ class UiServer {
     this.uiRoot = uiRoot;
     this.mcpRoot = mcpRoot;
     this.runtime = runtime;
+    this.midiManager = null;
     this.server = null;
     this.resolvedUiRoot = '';
   }
@@ -691,6 +767,18 @@ class UiServer {
         return;
       }
 
+      if (url.pathname === '/rt-ui.js') {
+        const filePath = path.join(this.mcpRoot, 'ui', 'rt-ui.js');
+        if (fs.existsSync(filePath)) {
+          res.writeHead(200, { 'Content-Type': 'application/javascript' });
+          res.end(fs.readFileSync(filePath));
+        } else {
+          res.writeHead(404);
+          res.end('Not found');
+        }
+        return;
+      }
+
       if (url.pathname === '/params') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ params: this.runtime.paramsCache }));
@@ -709,11 +797,60 @@ class UiServer {
         return;
       }
 
+      if (url.pathname === '/midi/inputs') {
+        if (!this.midiManager) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'error', error: 'MIDI backend not configured' }));
+          return;
+        }
+        this.midiManager.listInputs()
+          .then((payload) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(payload));
+          })
+          .catch((err) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'error', error: String(err) }));
+          });
+        return;
+      }
+
+      if (url.pathname === '/midi/select' && req.method === 'POST') {
+        if (!this.midiManager) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'error', error: 'MIDI backend not configured' }));
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk) => (body += chunk));
+        req.on('end', () => {
+          try {
+            const data = JSON.parse(body || '{}');
+            this.midiManager.selectInput(data)
+              .then((payload) => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(payload));
+              })
+              .catch((err) => {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', error: String(err) }));
+              });
+          } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'error', error: String(err) }));
+          }
+        });
+        return;
+      }
+
       if (url.pathname === '/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           name: this.runtime.dspName,
           running: !!this.runtime.faustNode,
+          midi_enabled: this.runtime.midiEnabled,
+          poly_nvoices: this.runtime.polyNvoices,
+          midi_active_notes: this.midiManager ? this.midiManager.getActiveNoteCount() : 0,
         }));
         return;
       }
@@ -789,6 +926,201 @@ class UiServer {
 }
 
 /**
+ * Optional Node-side MIDI input manager (bypasses browser/HTTP latency).
+ */
+class MidiInputManager {
+  /**
+   * @param {{runtime: WorkerRuntime, debug: boolean}} params
+   */
+  constructor({ runtime, debug }) {
+    this.runtime = runtime;
+    this.debug = !!debug;
+    this.backend = null;
+    this.input = null;
+    this.selectedIndex = null;
+    this.selectedName = null;
+    this.lastError = null;
+    this.noteOnCount = 0;
+    this.noteOffCount = 0;
+    this.activeNotes = new Set();
+  }
+
+  /**
+   * Load a MIDI backend (prefers @julusian/midi, falls back to midi).
+   * @returns {Promise<boolean>}
+   */
+  async ensureBackend() {
+    if (this.backend) return true;
+    const load = async (name) => {
+      try {
+        const mod = await import(name);
+        return mod.default ?? mod;
+      } catch (_) {
+        return null;
+      }
+    };
+    const require = createRequire(import.meta.url);
+    const localNodeMidi = path.join(
+      this.runtime?.compilerManager?.context?.mcpRoot || process.cwd(),
+      'external',
+      'node-midi',
+    );
+    let mod = await load('@julusian/midi');
+    if (!mod) {
+      try {
+        mod = require('@julusian/midi');
+      } catch (_) {}
+    }
+    if (!mod) {
+      mod = await load('midi');
+    }
+    if (!mod) {
+      try {
+        mod = require('midi');
+      } catch (_) {}
+    }
+    if (!mod) {
+      try {
+        mod = require(localNodeMidi);
+      } catch (_) {}
+    }
+    if (!mod || !mod.Input) {
+      this.lastError = 'MIDI backend not available (install @julusian/midi)';
+      return false;
+    }
+    this.backend = mod;
+    return true;
+  }
+
+  /**
+   * List available MIDI inputs.
+   * @returns {Promise<object>}
+   */
+  async listInputs() {
+    const ok = await this.ensureBackend();
+    if (!ok) {
+      return { status: 'error', available: false, error: this.lastError, inputs: [] };
+    }
+    const input = new this.backend.Input();
+    const count = input.getPortCount();
+    const inputs = [];
+    for (let i = 0; i < count; i++) {
+      inputs.push({ index: i, name: input.getPortName(i) });
+    }
+    return {
+      status: 'ok',
+      available: true,
+      inputs,
+      selected: this.selectedIndex === null
+        ? null
+        : { index: this.selectedIndex, name: this.selectedName },
+    };
+  }
+
+  /**
+   * Select and open a MIDI input by index or name.
+   * @param {{index?: number, name?: string}} params
+   * @returns {Promise<object>}
+   */
+  async selectInput({ index, name }) {
+    const result = await this.listInputs();
+    if (!result.available) return result;
+    let selectedIndex = Number.isFinite(index) ? Number(index) : null;
+    if (selectedIndex === null && name) {
+      const match = result.inputs.find((input) => input.name === name);
+      if (match) selectedIndex = match.index;
+    }
+    if (selectedIndex === null) {
+      return { status: 'error', error: 'Missing MIDI input index or name' };
+    }
+    const selected = result.inputs.find((input) => input.index === selectedIndex);
+    if (!selected) {
+      return { status: 'error', error: 'MIDI input not found' };
+    }
+    try {
+      await this.openInput(selected.index, selected.name);
+    } catch (err) {
+      return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+    }
+    return { status: 'ok', selected: { index: this.selectedIndex, name: this.selectedName } };
+  }
+
+  /**
+   * Return the current count of active notes (note-on without note-off).
+   * @returns {number}
+   */
+  getActiveNoteCount() {
+    return this.activeNotes.size;
+  }
+
+  /**
+   * Open the selected MIDI input and bind to MIDI events.
+   * @param {number} index
+   * @param {string} name
+   */
+  async openInput(index, name) {
+    const ok = await this.ensureBackend();
+    if (!ok) {
+      throw new Error(this.lastError || 'MIDI backend not available');
+    }
+    if (this.input) {
+      try {
+        this.input.closePort();
+      } catch (_) {}
+    }
+    const input = new this.backend.Input();
+    if (typeof input.ignoreTypes === 'function') {
+      input.ignoreTypes(false, false, false);
+    }
+    input.on('message', (_, message) => this.handleMessage(message));
+    input.openPort(index);
+    this.input = input;
+    this.selectedIndex = index;
+    this.selectedName = name ?? input.getPortName(index);
+  }
+
+  /**
+   * Forward a MIDI message to the current Faust node.
+   * @param {number[]|Uint8Array} message
+   */
+  handleMessage(message) {
+    const node = this.runtime?.faustNode;
+    if (!node || typeof node.midiMessage !== 'function') return;
+    const data = message instanceof Uint8Array ? message : Uint8Array.from(message);
+    const status = data[0] ?? 0;
+    const type = status & 0xf0;
+    const channel = status & 0x0f;
+    const note = data[1] ?? 0;
+    const velocity = data[2] ?? 0;
+    const noteKey = `${channel}:${note}`;
+    if (type === 0x90 && velocity > 0) {
+      this.activeNotes.add(noteKey);
+    } else if (type === 0x80 || (type === 0x90 && velocity === 0)) {
+      this.activeNotes.delete(noteKey);
+    } else if (type === 0xb0 && (data[1] === 120 || data[1] === 123)) {
+      for (const key of this.activeNotes) {
+        if (key.startsWith(`${channel}:`)) {
+          this.activeNotes.delete(key);
+        }
+      }
+    }
+    if (this.debug) {
+      if (type === 0x90 && velocity > 0) {
+        this.noteOnCount += 1;
+      } else if (type === 0x80 || (type === 0x90 && velocity === 0)) {
+        this.noteOffCount += 1;
+      }
+      console.error(
+        `MIDI debug: [${Array.from(data).join(', ')}] noteOn=${this.noteOnCount} noteOff=${this.noteOffCount}`
+      );
+    }
+    try {
+      node.midiMessage(data);
+    } catch (_) {}
+  }
+}
+
+/**
  * Minimal JSON-over-stdin protocol wrapper for the Python MCP server.
  */
 class ProtocolServer {
@@ -858,6 +1190,11 @@ class WorkerApp {
       mcpRoot: this.context.mcpRoot,
       runtime: this.runtime,
     });
+    this.midiManager = new MidiInputManager({
+      runtime: this.runtime,
+      debug: this.context.midiDebug,
+    });
+    this.uiServer.midiManager = this.midiManager;
     this.handlers = this.buildHandlers();
     this.protocolServer = new ProtocolServer({ handlers: this.handlers });
   }
@@ -875,6 +1212,8 @@ class WorkerApp {
       get_params: () => this.runtime.getParams(),
       get_param_values: () => this.runtime.getParamValues(),
       get_audio_metrics: (params) => this.runtime.getAudioMetrics(params || {}),
+      get_midi_inputs: () => this.midiManager.listInputs(),
+      select_midi_input: (params) => this.midiManager.selectInput(params || {}),
       set_param_values: (params) => this.runtime.setParamValues(params || {}),
       stop: () => this.runtime.stop(),
     };

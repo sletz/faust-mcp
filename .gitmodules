@@ -1,3 +1,6 @@
 [submodule "external/node-web-audio-api"]
 	path = external/node-web-audio-api
 	url = https://github.com/sletz/node-web-audio-api
+[submodule "external/node-midi"]
+	path = external/node-midi
+	url = git@github.com:Julusian/node-midi.git
