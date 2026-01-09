@@ -1,5 +1,7 @@
 # Faust MCP Servers
 
+![Faust MCP UI](docs/faust-rt.jpg)
+
 This repository provides three MCP servers that compile, render, or play Faust DSP code:
 
 - `faust_server.py`: C++ compile pipeline (Faust CLI + g++).
