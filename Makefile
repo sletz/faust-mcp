@@ -21,7 +21,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw client-rt rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt
+.PHONY: help setup setup-rt setup-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt
 
 help:
 	@printf "Targets:\n"
@@ -43,7 +43,6 @@ help:
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
-	@printf "  client-rt    Call the real-time server using t1.dsp\n"
 	@printf "\n"
 	@printf "Real-time tools:\n"
 	@printf "  rt-compile    Compile/start DSP on real-time server\n"
@@ -63,6 +62,7 @@ help:
 	@printf "\nVars:\n"
 	@printf "  MCP_HOST=%s\n" "$(MCP_HOST)"
 	@printf "  MCP_PORT=%s\n" "$(MCP_PORT)"
+	@printf "  MCP_TRANSPORT=%s\n" "$(MCP_TRANSPORT)"
 	@printf "  TMPDIR=%s\n" "$(TMPDIR)"
 	@printf "  DSP=%s\n" "$(DSP)"
 	@printf "  DD_SAMPLE_RATE=%s\n" "$(DD_SAMPLE_RATE)"
@@ -95,7 +95,7 @@ setup-ui:
 	cd ui && npm install
 
 setup-midi:
-	git submodule update --init --recursive external/node-midi 
+	git submodule update --init --recursive external/node-midi
 	cd external/node-midi && npm install && npm run build:ts
 
 clean:
@@ -155,13 +155,6 @@ run-rt-stdio-ui:
 run-rt-stdio-session:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
 	$(PYTHON) stdio_rt_session.py
-
-client-rt:
-	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
-		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
-		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
-		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),) \
-		$(if $(filter 1 true yes,$(HIDE_METERS)),--hide-meters,)
 
 rt-compile:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \

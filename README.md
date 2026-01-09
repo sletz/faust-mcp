@@ -6,6 +6,9 @@ This repository provides three MCP servers that compile, render, or play Faust D
 - `faust_server_daw.py`: DawDreamer offline render pipeline.
 - `faust_realtime_server.py`: real-time playback via node-web-audio-api + Faust WASM.
 
+For MCP protocol background, see:
+- https://modelcontextprotocol.io
+
 ## Structure
 
 - `faust_server.py`: MCP server entrypoint (FastMCP) and tool implementation.
@@ -328,6 +331,7 @@ native audio I/O.
 - Node.js
 - `node-web-audio-api` checkout at `WEBAUDIO_ROOT` (submodule: `external/node-web-audio-api`)
 - `@grame/faustwasm` installed in that checkout
+- Optional: `@julusian/midi` backend for Node-side MIDI input (submodule: `external/node-midi`)
 - Optional: `@shren/faust-ui` installed in `ui/` for the UI bridge
 
 Environment variables:
@@ -344,6 +348,15 @@ git submodule update --init --recursive
 cd external/node-web-audio-api
 npm install
 npm run build
+```
+
+MIDI backend setup (optional):
+
+```bash
+git submodule update --init --recursive external/node-midi
+cd external/node-midi
+npm install
+npm run build:ts
 ```
 
 ### Notes
@@ -399,6 +412,7 @@ just below the MIDI device selector.
 Probe scopes are derived from `get_audio_metrics().probes` values. The UI
 selects a probe ID and plots a rolling history of those values (no extra DSP
 analysis is required).
+For details on the WebSocket analysis stream, see `docs/ws-metrics.md`.
 
 ```bash
 WEBAUDIO_ROOT=external/node-web-audio-api \

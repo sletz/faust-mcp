@@ -1,11 +1,63 @@
 /**
  * WebSocket metrics server used by the rt-ui for real-time analysis streaming.
  *
- * Responsibilities:
- * - Upgrade HTTP connections on `/ws` to WebSocket.
- * - Accept JSON subscriptions (scope/spectrum/probes + rates).
- * - Push `getAudioMetrics()` payloads on a server-controlled cadence.
- * - Keep payloads compatible with the HTTP `/audio-metrics` response.
+ * Protocol (JSON messages over WS):
+ *
+ * Client -> Server (subscribe)
+ * ```json
+ * {
+ *   "type": "subscribe",
+ *   "include_scope": true,
+ *   "include_spectrum": false,
+ *   "per_channel": false,
+ *   "scope_fps": 8,
+ *   "spectrum_fps": 2,
+ *   "probe_fps": 2,
+ *   "probe_id": 3,
+ *   "fft_size": 1024,
+ *   "smoothing": 0.8,
+ *   "min_db": -90,
+ *   "max_db": 0,
+ *   "edge_threshold": 0.09,
+ *   "log_bins": 32
+ * }
+ * ```
+ *
+ * Fields:
+ * - `include_scope` / `include_spectrum`: toggles for analysis payloads.
+ * - `per_channel`: include `channels[]` arrays in scope/spectrum payloads.
+ * - `scope_fps` / `spectrum_fps` / `probe_fps`: requested frame rates (server clamps).
+ * - `probe_id`: optional probe id filter; if omitted, all probes are sent.
+ * - analyser tuning: `fft_size`, `smoothing`, `min_db`, `max_db`, `edge_threshold`, `log_bins`.
+ *
+ * Client -> Server (ping)
+ * ```json
+ * { "type": "ping" }
+ * ```
+ *
+ * Server -> Client (metrics)
+ * ```json
+ * {
+ *   "type": "metrics",
+ *   "schema_version": "faust-mcp-rt/1",
+ *   "timestamp_ms": 1735860123456,
+ *   "payload": { ...getAudioMetrics(...) }
+ * }
+ * ```
+ *
+ * Server -> Client (error)
+ * ```json
+ * { "type": "error", "timestamp_ms": 1735860123456, "error": "message" }
+ * ```
+ *
+ * Server -> Client (pong)
+ * ```json
+ * { "type": "pong", "timestamp_ms": 1735860123456 }
+ * ```
+ *
+ * Notes:
+ * - Payload format mirrors `/audio-metrics`.
+ * - Server decides actual cadence; frames may be dropped if not due.
  */
 import crypto from 'node:crypto';
 
