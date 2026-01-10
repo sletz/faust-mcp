@@ -1,18 +1,19 @@
 <!doctype html>
+<!-- Browser-only RT UI entrypoint. -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Faust RT UI</title>
+  <title>Faust Browser RT UI</title>
   <link rel="stylesheet" href="/faust-ui/index.css" />
-  <link rel="stylesheet" href="/rt-ui.css" />
+  <link rel="stylesheet" href="/rt-browser-ui.css" />
 </head>
 <body>
   <div class="app-shell">
     <header class="app-header">
       <div class="app-header-left">
         <div class="app-title-row">
-          <div class="app-title">Faust MCP (node)</div>
+          <div class="app-title">Faust MCP (Browser)</div>
           <div class="app-actions">
             <button class="app-action-btn" id="compact-toggle" type="button" aria-pressed="false">
               Compact
@@ -37,13 +38,37 @@
     </header>
 
     <main class="app-main">
-      <section class="panel panel-faust">
-        <div class="panel-header">Faust UI</div>
-        <div id="faust-ui-container">
-          <div id="faust-ui-root"></div>
+      <div class="left-column">
+        <section class="panel panel-faust">
+          <div class="panel-header">Faust UI</div>
+          <div id="faust-ui-container">
+            <div id="faust-ui-root"></div>
+          </div>
+          <div id="fallback-ui"></div>
+        </section>
+
+        <section class="panel panel-diagram">
+        <div class="panel-header panel-header-diagram">
+          <span>DSP Diagram</span>
+          <div class="diagram-actions">
+            <button class="panel-toggle" id="diagram-home" type="button" disabled>
+              Home
+            </button>
+            <button class="panel-toggle" id="diagram-back" type="button" disabled>
+              Back
+            </button>
+            <button class="panel-toggle" id="diagram-toggle" type="button" aria-expanded="false">
+              Show Diagram
+            </button>
+          </div>
         </div>
-        <div id="fallback-ui"></div>
-      </section>
+          <div class="panel-body panel-diagram-body is-hidden" id="diagram-body">
+            <div class="diagram-container" id="diagram-container">
+              <div class="diagram-empty">No diagram yet.</div>
+            </div>
+          </div>
+        </section>
+      </div>
 
       <div class="right-column">
         <section class="panel panel-scope">
@@ -99,6 +124,6 @@
     </footer>
   </div>
 
-  <script type="module" src="/rt-ui.js"></script>
+  <script type="module" src="/rt-browser-ui.js"></script>
 </body>
 </html>

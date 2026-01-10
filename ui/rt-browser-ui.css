@@ -1,0 +1,150 @@
+/* Browser-only RT UI overrides and loader styling. */
+@import "/rt-ui.css";
+
+.app-title {
+  letter-spacing: 0.02em;
+}
+
+.status {
+  color: #f08b3e;
+}
+
+.left-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+  min-height: 0;
+}
+
+.browser-loader {
+  display: grid;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.browser-loader-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.browser-loader-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.browser-loader-note {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.browser-loader-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(10, 10, 10, 0.2);
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.browser-loader-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.browser-loader-btn {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  padding: 6px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.browser-loader-btn:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.browser-loader-btn:active {
+  transform: translateY(0);
+}
+
+.browser-loader-btn.is-primary {
+  border-color: rgba(240, 139, 62, 0.7);
+  background: rgba(240, 139, 62, 0.18);
+  box-shadow: 0 0 0 1px rgba(240, 139, 62, 0.2);
+}
+
+.browser-loader-status {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.panel-header-diagram {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagram-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-toggle[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.panel-diagram-body {
+  max-height: 380px;
+  overflow: auto;
+  padding-top: 8px;
+}
+
+.panel-diagram-body.is-hidden {
+  display: none;
+}
+
+.diagram-container {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.diagram-container svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.diagram-empty {
+  font-size: 12px;
+  opacity: 0.7;
+}

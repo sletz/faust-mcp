@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "dependencies": {
+    "@grame/faustwasm": "^0.15.0",
     "@shren/faust-ui": "^1.1.19"
   }
 }

@@ -21,13 +21,14 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt
+.PHONY: help setup setup-rt setup-ui setup-ui-browser setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt test-browser-api
 
 help:
 	@printf "Targets:\n"
 	@printf "  setup        Create tmp/ and install Python deps\n"
 	@printf "  setup-rt     Install node-web-audio-api deps and build native module\n"
 	@printf "  setup-ui     Install @shren/faust-ui in this repo\n"
+	@printf "  setup-ui-browser Install browser UI deps (Faust UI + faustwasm)\n"
 	@printf "  setup-midi   Init node-midi submodule and install native deps\n"
 	@printf "  clean        Remove tmp/ and server logs\n"
 	@printf "  smoke-test   Run a basic stdio test against both servers\n"
@@ -39,6 +40,10 @@ help:
 	@printf "  run-rt-stdio Start real-time MCP server over stdio\n"
 	@printf "  run-rt-stdio-ui Start real-time MCP server over stdio with UI bridge\n"
 	@printf "  run-rt-stdio-session Start a persistent stdio session (multi-DSP)\n"
+	@printf "  run-browser-ui Start browser-only runtime (SSE + static UI)\n"
+	@printf "  run-browser-stdio Start browser-only runtime (stdio + static UI)\n"
+	@printf "  run-browser-static Start only a static server (open /rt-browser-ui.html)\n"
+	@printf "  test-browser-api Run the browser-only API test script\n"
 	@printf "  stop-rt      Stop the real-time server (SSE or stdio)\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
@@ -93,6 +98,9 @@ setup-rt:
 
 setup-ui:
 	cd ui && npm install
+
+setup-ui-browser:
+	cd ui && npm install && npm install @grame/faustwasm
 
 setup-midi:
 	git submodule update --init --recursive external/node-midi
@@ -155,6 +163,20 @@ run-rt-stdio-ui:
 run-rt-stdio-session:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
 	$(PYTHON) stdio_rt_session.py
+
+run-browser-ui:
+	MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
+	$(PYTHON) faust_browser_server.py
+
+run-browser-stdio:
+	MCP_TRANSPORT=stdio \
+	$(PYTHON) faust_browser_server.py
+
+run-browser-static:
+	$(PYTHON) -m http.server 8010 --directory ui
+
+test-browser-api:
+	./scripts/test_full_api_browser.sh
 
 rt-compile:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \
