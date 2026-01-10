@@ -1,8 +1,11 @@
 # Faust MCP Servers
 
-![Faust MCP UI](docs/faust-rt.jpg)
+<p>
+  <img src="docs/faust-node.jpg" alt="Faust Node UI" width="48%" height="240" style="margin-right: 12px; object-fit: cover;" />
+  <img src="docs/faust-browser.jpg" alt="Faust Browser UI" width="48%" height="240" style="object-fit: cover;" />
+</p>
 
-This repository provides three MCP servers that compile, render, or play Faust DSP code:
+This repository provides four MCP servers that compile, render, or play Faust DSP code:
 
 - `faust_server.py`: C++ compile pipeline (Faust CLI + g++).
 - `faust_server_daw.py`: DawDreamer offline render pipeline.
@@ -17,6 +20,7 @@ For MCP protocol background, see:
 - `faust_server.py`: MCP server entrypoint (FastMCP) and tool implementation.
 - `faust_server_daw.py`: DawDreamer-based MCP server (no C++ compile step).
 - `faust_realtime_server.py`: Real-time MCP server using node-web-audio-api + Faust WASM.
+- `faust_browser_server.py`: Browser-only runtime proxy + static server.
 - `faust_realtime_worker.mjs`: Node worker that hosts the real-time DSP graph.
 - `analysis_arch.cpp`: Faust C++ architecture used to generate analysis data.
 - `t1.dsp`, `t2.dsp`, `noise.dsp`, `probe.dsp`: Example Faust DSP programs.
