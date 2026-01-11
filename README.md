@@ -98,113 +98,6 @@ Cleanup:
 make clean
 ```
 
-## Browser-Only Runtime (Experimental)
-
-This runtime keeps DSP compilation + audio + UI entirely in the browser. A small
-Python proxy (`faust_browser_server.py`) serves static assets and optionally
-exposes MCP tools over SSE/stdio via a long-polling bridge.
-
-### Setup
-
-```bash
-make setup-ui-browser
-```
-
-### Run
-
-Recommended:
-
-```bash
-make run-browser-ui
-```
-
-```bash
-MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \\
-python3 faust_browser_server.py
-```
-
-Open the UI in a browser:
-
-- `http://127.0.0.1:8010/`
-
-Notes:
-
-- The browser must be real (WebAudio + Web MIDI); headless is not supported.
-- Tool calls from MCP clients are forwarded to the browser via `/bridge/*`.
-- `make test-browser-api` runs the full MCP tool sequence (requires a browser tab open).
-- SVG diagrams are rendered in the browser UI (DSP Diagram panel) and support in-SVG navigation.
-
-### Quick DSP example
-
-You can prefill DSP code via query param:
-
-- `http://127.0.0.1:8010/?dsp=process%3Dos.osc(440)%3B`
-
-### Claude Desktop setup (browser-only)
-
-Add a new MCP server entry in Claude Desktop’s config (stdio transport):
-
-```json
-{
-  "mcpServers": {
-    "faust-browser": {
-      "command": "python3",
-      "args": [
-        "/path/to/faust-mcp/faust_browser_server.py"
-      ],
-      "env": {
-        "MCP_TRANSPORT": "stdio",
-        "BROWSER_UI_HOST": "127.0.0.1",
-        "BROWSER_UI_PORT": "8010",
-        "BROWSER_UI_ROOT": "/path/to/faust-mcp",
-        "BROWSER_UI_INDEX": "ui/rt-browser-ui.html"
-      }
-    }
-  }
-}
-```
-
-Then:
-
-1) Open `http://127.0.0.1:8010/` in a browser and click **Unlock Audio**.  
-2) In Claude, choose the `faust-browser` server and call tools.
-
-### Claude Desktop setup (both faust-node + faust-browser)
-
-If you want both runtimes available, add two entries:
-
-```json
-{
-  "mcpServers": {
-    "faust-node": {
-      "command": "python3",
-      "args": [
-        "/path/to/faust-mcp/faust_realtime_server.py"
-      ],
-      "env": {
-        "MCP_TRANSPORT": "stdio",
-        "WEBAUDIO_ROOT": "/path/to/faust-mcp/external/node-web-audio-api",
-        "FAUST_UI_PORT": "8787",
-        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_realtime_worker.mjs"
-      }
-    },
-    "faust-browser": {
-      "command": "python3",
-      "args": [
-        "/path/to/faust-mcp/faust_browser_server.py"
-      ],
-      "env": {
-        "MCP_TRANSPORT": "stdio",
-        "BROWSER_UI_HOST": "127.0.0.1",
-        "BROWSER_UI_PORT": "8010",
-        "BROWSER_UI_ROOT": "/path/to/faust-mcp",
-        "BROWSER_UI_INDEX": "ui/rt-browser-ui.html"
-      }
-    }
-  }
-}
-```
-
 ## Shared Environment Variables
 
 - `MCP_HOST` (default: `127.0.0.1`)
@@ -548,6 +441,113 @@ python3 faust_realtime_server.py
 Then open:
 
 - `http://127.0.0.1:8787/`
+
+## Server 4: Browser-Only Runtime
+
+This runtime keeps DSP compilation + audio + UI entirely in the browser. A small
+Python proxy (`faust_browser_server.py`) serves static assets and optionally
+exposes MCP tools over SSE/stdio via a long-polling bridge.
+
+### Setup
+
+```bash
+make setup-ui-browser
+```
+
+### Run
+
+Recommended:
+
+```bash
+make run-browser-ui
+```
+
+```bash
+MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \\
+python3 faust_browser_server.py
+```
+
+Open the UI in a browser:
+
+- `http://127.0.0.1:8010/`
+
+Notes:
+
+- The browser must be real (WebAudio + Web MIDI); headless is not supported.
+- Tool calls from MCP clients are forwarded to the browser via `/bridge/*`.
+- `make test-browser-api` runs the full MCP tool sequence (requires a browser tab open).
+- SVG diagrams are rendered in the browser UI (DSP Diagram panel) and support in-SVG navigation.
+
+### Quick DSP example
+
+You can prefill DSP code via query param:
+
+- `http://127.0.0.1:8010/?dsp=process%3Dos.osc(440)%3B`
+
+### Claude Desktop setup (browser-only)
+
+Add a new MCP server entry in Claude Desktop’s config (stdio transport):
+
+```json
+{
+  "mcpServers": {
+    "faust-browser": {
+      "command": "python3",
+      "args": [
+        "/path/to/faust-mcp/faust_browser_server.py"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "BROWSER_UI_HOST": "127.0.0.1",
+        "BROWSER_UI_PORT": "8010",
+        "BROWSER_UI_ROOT": "/path/to/faust-mcp",
+        "BROWSER_UI_INDEX": "ui/rt-browser-ui.html"
+      }
+    }
+  }
+}
+```
+
+Then:
+
+1) Open `http://127.0.0.1:8010/` in a browser and click **Unlock Audio**.  
+2) In Claude, choose the `faust-browser` server and call tools.
+
+### Claude Desktop setup (both faust-node + faust-browser)
+
+If you want both runtimes available, add two entries:
+
+```json
+{
+  "mcpServers": {
+    "faust-node": {
+      "command": "python3",
+      "args": [
+        "/path/to/faust-mcp/faust_realtime_server.py"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "WEBAUDIO_ROOT": "/path/to/faust-mcp/external/node-web-audio-api",
+        "FAUST_UI_PORT": "8787",
+        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_realtime_worker.mjs"
+      }
+    },
+    "faust-browser": {
+      "command": "python3",
+      "args": [
+        "/path/to/faust-mcp/faust_browser_server.py"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "BROWSER_UI_HOST": "127.0.0.1",
+        "BROWSER_UI_PORT": "8010",
+        "BROWSER_UI_ROOT": "/path/to/faust-mcp",
+        "BROWSER_UI_INDEX": "ui/rt-browser-ui.html"
+      }
+    }
+  }
+}
+```
 
 ### Real-time tools
 
