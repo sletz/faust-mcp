@@ -24,6 +24,7 @@ class RtBrowserUiApp {
     this.scopePollMs = 200;
     this.spectrumPollMs = 400;
     this.lastSpectrumFetch = 0;
+    this.statusPollMs = 500;
     this.probeSeries = [];
     this.probeMaxPoints = 200;
     this.probePollMs = 400;
@@ -1353,6 +1354,7 @@ class RtBrowserUiApp {
     setInterval(() => this.refreshScopeData(), this.scopePollMs);
     setInterval(() => this.refreshProbeData(), this.probePollMs);
     setInterval(() => this.refreshParamValues(), this.paramPollMs);
+    setInterval(() => this.updateStatusFromRuntime(), this.statusPollMs);
 
     // TODO: implement DSP load flow and UI wiring.
     // Suggested flow:
