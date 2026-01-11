@@ -158,6 +158,14 @@ body {
   min-height: 0;
 }
 
+.app-shell.is-right-collapsed .app-main {
+  grid-template-columns: 1fr;
+}
+
+.app-shell.is-right-collapsed .right-column {
+  display: none;
+}
+
 .right-column {
   display: flex;
   flex-direction: column;

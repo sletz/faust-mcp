@@ -50,6 +50,7 @@ class RtBrowserUiApp {
       faustRoot: document.getElementById('faust-ui-root'),
       fallback: document.getElementById('fallback-ui'),
       compactToggle: document.getElementById('compact-toggle'),
+      analysisToggle: document.getElementById('analysis-toggle'),
       midiSelect: document.getElementById('midi-select'),
       midiStatus: document.getElementById('midi-status'),
       polyActive: document.getElementById('poly-active'),
@@ -131,6 +132,28 @@ class RtBrowserUiApp {
   }
 
   /**
+   * Toggle the analysis (scope/spectrum/probe) column.
+   * @param {boolean} visible
+   */
+  setAnalysisVisibility(visible) {
+    if (!this.dom.appShell) return;
+    this.dom.appShell.classList.toggle('is-right-collapsed', !visible);
+    if (this.dom.analysisToggle) {
+      this.dom.analysisToggle.classList.toggle('is-active', !visible);
+      this.dom.analysisToggle.setAttribute(
+        'aria-pressed',
+        visible ? 'false' : 'true'
+      );
+      this.dom.analysisToggle.textContent = visible
+        ? 'Hide Analysis'
+        : 'Show Analysis';
+    }
+    try {
+      localStorage.setItem('rt-browser-analysis-hidden', visible ? '0' : '1');
+    } catch (_) {}
+  }
+
+  /**
    * Restore compact mode from localStorage.
    */
   restoreCompactMode() {
@@ -143,6 +166,18 @@ class RtBrowserUiApp {
   }
 
   /**
+   * Restore analysis column visibility from localStorage.
+   */
+  restoreAnalysisVisibility() {
+    try {
+      const value = localStorage.getItem('rt-browser-analysis-hidden');
+      this.setAnalysisVisibility(value !== '1');
+    } catch (_) {
+      this.setAnalysisVisibility(true);
+    }
+  }
+
+  /**
    * Wire top-level UI events.
    */
   bindEvents() {
@@ -150,6 +185,12 @@ class RtBrowserUiApp {
       this.dom.compactToggle.addEventListener('click', () => {
         const enabled = !this.dom.appShell.classList.contains('is-compact');
         this.setCompactMode(enabled);
+      });
+    }
+    if (this.dom.analysisToggle) {
+      this.dom.analysisToggle.addEventListener('click', () => {
+        const isHidden = this.dom.appShell.classList.contains('is-right-collapsed');
+        this.setAnalysisVisibility(isHidden);
       });
     }
   }
@@ -1282,6 +1323,7 @@ class RtBrowserUiApp {
    */
   async init() {
     this.restoreCompactMode();
+    this.restoreAnalysisVisibility();
     this.bindEvents();
     this.setupScopeTabs();
     this.setupScopeChannel();

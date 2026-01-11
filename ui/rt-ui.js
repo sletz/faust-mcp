@@ -44,6 +44,7 @@ class RtUiApp {
       midiStatus: document.getElementById('midi-status'),
       polyActive: document.getElementById('poly-active'),
       compactToggle: document.getElementById('compact-toggle'),
+      analysisToggle: document.getElementById('analysis-toggle'),
       // Scope/spectrum controls.
       scopeTabs: Array.from(document.querySelectorAll('.scope-tab')),
       scopeCanvas: document.getElementById('scope-canvas'),
@@ -110,6 +111,21 @@ class RtUiApp {
     this.updateFaustUiScale();
   }
 
+  // Show/hide the analysis column and persist in localStorage.
+  setAnalysisVisibility(visible) {
+    const root = this.dom.appShell;
+    if (!root) return;
+    root.classList.toggle('is-right-collapsed', !visible);
+    if (this.dom.analysisToggle) {
+      this.dom.analysisToggle.classList.toggle('is-active', !visible);
+      this.dom.analysisToggle.setAttribute('aria-pressed', visible ? 'false' : 'true');
+      this.dom.analysisToggle.textContent = visible ? 'Hide Analysis' : 'Show Analysis';
+    }
+    try {
+      localStorage.setItem('rt-ui-analysis-hidden', visible ? '0' : '1');
+    } catch (_) {}
+  }
+
   // Restore compact mode from localStorage on load.
   restoreCompactMode() {
     try {
@@ -117,6 +133,16 @@ class RtUiApp {
       this.setCompactMode(value === '1');
     } catch (_) {
       this.setCompactMode(false);
+    }
+  }
+
+  // Restore analysis column visibility from localStorage on load.
+  restoreAnalysisVisibility() {
+    try {
+      const value = localStorage.getItem('rt-ui-analysis-hidden');
+      this.setAnalysisVisibility(value !== '1');
+    } catch (_) {
+      this.setAnalysisVisibility(true);
     }
   }
 
@@ -897,7 +923,14 @@ class RtUiApp {
         this.setCompactMode(enabled);
       });
     }
+    if (this.dom.analysisToggle) {
+      this.dom.analysisToggle.addEventListener('click', () => {
+        const isHidden = this.dom.appShell?.classList.contains('is-right-collapsed');
+        this.setAnalysisVisibility(isHidden);
+      });
+    }
     this.restoreCompactMode();
+    this.restoreAnalysisVisibility();
     window.addEventListener('resize', () => this.updateFaustUiScale());
     this.setupScopeTabs();
     this.setupScopeChannel();
