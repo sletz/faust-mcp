@@ -460,6 +460,118 @@ class WorkerRuntime {
     return this.faustNode.getParams?.() ?? this.paramsCache.map((p) => p.path);
   }
 
+  async prepareForNewGraph() {
+    if (this.audioContext) {
+      await this.stop();
+    } else {
+      this.resetState();
+    }
+  }
+
+  initAudioContext(latency_hint) {
+    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
+    const AudioContext = this.compilerManager.AudioContext;
+    this.audioContext = new AudioContext({ latencyHint: hint });
+    return hint;
+  }
+
+  async createFaustNode({ wasmFactory, effectFactory, parsedJson, name }) {
+    if (this.polyNvoices > 0) {
+      const polyGenerator = this.compilerManager.createPolyGenerator();
+      const isDouble = parsedJson?.compile_options?.includes('-double');
+      const { mixerModule } = await this.compilerManager.compiler.getAsyncInternalMixerModule(
+        !!isDouble,
+      );
+      return polyGenerator.createNode(
+        this.audioContext,
+        this.polyNvoices,
+        name || parsedJson?.name || 'faust-rt',
+        wasmFactory,
+        mixerModule,
+        effectFactory || undefined,
+      );
+    }
+    const monoGenerator = this.compilerManager.createGenerator();
+    return monoGenerator.createNode(
+      this.audioContext,
+      name || parsedJson?.name || 'faust-rt',
+      wasmFactory,
+    );
+  }
+
+  attachParamHandlers() {
+    this.outputParamsCache = {};
+    this.inputParamsCache = {};
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
+    });
+    if (typeof this.faustNode.setOutputParamHandler === 'function') {
+      this.faustNode.setOutputParamHandler((path, value) => {
+        this.outputParamsCache[path] = value;
+      });
+    }
+    if (typeof this.faustNode.setInputParamHandler === 'function') {
+      this.faustNode.setInputParamHandler((path, value) => {
+        this.inputParamsCache[path] = value;
+      });
+    }
+  }
+
+  tryStartNode() {
+    try {
+      this.faustNode.start();
+    } catch (_) {}
+  }
+
+  resolveRuntimeJson({ fallback, allowFallback }) {
+    try {
+      const runtimeJson = this.faustNode.getJSON();
+      if (runtimeJson) {
+        return JSON.parse(runtimeJson);
+      }
+    } catch (err) {
+      if (!allowFallback) {
+        throw err;
+      }
+    }
+    if (!allowFallback) {
+      throw new Error('Failed to read Faust JSON from runtime');
+    }
+    return fallback;
+  }
+
+  finalizeRuntimeState({ hint, name, fallbackJson, allowFallback }) {
+    const resolvedJson = this.resolveRuntimeJson({ fallback: fallbackJson, allowFallback });
+    this.faustJson = resolvedJson;
+    this.dspName = this.faustJson?.name || name || null;
+    this.paramsCache = extractParamsFromJson(this.faustJson);
+    this.meterUnitsByPath = extractBargraphUnits(this.faustJson);
+    this.meterProbesByPath = extractBargraphProbes(this.faustJson);
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
+    });
+    this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
+
+    return this.buildRuntimeResponse({ hint, name });
+  }
+
+  buildRuntimeResponse({ hint, name }) {
+    return this.withSchema({
+      status: 'compiled',
+      name: this.dspName || name,
+      latency_hint: hint,
+      inputs: this.faustJson?.inputs ?? null,
+      outputs: this.faustJson?.outputs ?? null,
+      params: this.paramsCache,
+      param_paths: this.getParamPaths(),
+      faust_json: this.faustJson,
+    });
+  }
+
   /**
    * Compile DSP code and start audio rendering.
    * @param {object} params
@@ -476,23 +588,8 @@ class WorkerRuntime {
   }) {
     await this.compilerManager.ensureReady();
 
-    if (this.audioContext) {
-      await this.stop();
-    }
-    this.started = false;
-    this.paramsCache = [];
-    this.meterUnitsByPath = {};
-    this.meterProbesByPath = {};
-    this.faustJson = null;
-    this.dspName = null;
-    this.wasmFactory = null;
-    this.wasmEffectFactory = null;
-    this.polyNvoices = 0;
-    this.midiEnabled = false;
-
-    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
-    const AudioContext = this.compilerManager.AudioContext;
-    this.audioContext = new AudioContext({ latencyHint: hint });
+    await this.prepareForNewGraph();
+    const hint = this.initAudioContext(latency_hint);
 
     const monoGenerator = this.compilerManager.createGenerator();
     const wrapped = wrapTestInputs(
@@ -539,40 +636,28 @@ class WorkerRuntime {
       }
       this.wasmFactory = polyGenerator.voiceFactory || null;
       this.wasmEffectFactory = polyGenerator.effectFactory || null;
-      this.faustNode = await polyGenerator.createNode(
-        this.audioContext,
-        this.polyNvoices,
+      this.faustNode = await this.createFaustNode({
+        wasmFactory: this.wasmFactory,
+        effectFactory: this.wasmEffectFactory,
+        parsedJson: metaJson,
         name,
-      );
+      });
     } else {
       this.wasmFactory = monoGenerator.factory || null;
       this.wasmEffectFactory = null;
-      this.faustNode = await monoGenerator.createNode(this.audioContext);
+      this.faustNode = await this.createFaustNode({
+        wasmFactory: this.wasmFactory,
+        effectFactory: null,
+        parsedJson: metaJson,
+        name,
+      });
     }
 
     if (!this.faustNode) {
       throw new ToolError('node_create_failed', 'Failed to create Faust node');
     }
 
-    // Register handler for output parameters (bargraphs).
-    this.outputParamsCache = {};
-    this.inputParamsCache = {};
-    this.metricsCollector.setMeterCaches({
-      outputParamsCache: this.outputParamsCache,
-      meterUnitsByPath: this.meterUnitsByPath,
-      meterProbesByPath: this.meterProbesByPath,
-    });
-    if (typeof this.faustNode.setOutputParamHandler === 'function') {
-      this.faustNode.setOutputParamHandler((path, value) => {
-        this.outputParamsCache[path] = value;
-      });
-    }
-
-    if (typeof this.faustNode.setInputParamHandler === 'function') {
-      this.faustNode.setInputParamHandler((path, value) => {
-        this.inputParamsCache[path] = value;
-      });
-    }
+    this.attachParamHandlers();
 
     // Handle file input: load audio file and connect to FAUST input.
     if (wrapped.useExternalInput && wrapped.inputFile) {
@@ -605,30 +690,13 @@ class WorkerRuntime {
       }
     }
 
-    this.faustNode.start();
+    this.tryStartNode();
 
-    const jsonStr = this.faustNode.getJSON();
-    this.faustJson = JSON.parse(jsonStr);
-    this.dspName = this.faustJson?.name || name || null;
-    this.paramsCache = extractParamsFromJson(this.faustJson);
-    this.meterUnitsByPath = extractBargraphUnits(this.faustJson);
-    this.meterProbesByPath = extractBargraphProbes(this.faustJson);
-    this.metricsCollector.setMeterCaches({
-      outputParamsCache: this.outputParamsCache,
-      meterUnitsByPath: this.meterUnitsByPath,
-      meterProbesByPath: this.meterProbesByPath,
-    });
-    this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
-
-    return this.withSchema({
-      status: 'compiled',
+    return this.finalizeRuntimeState({
+      hint,
       name,
-      latency_hint: hint,
-      inputs: this.faustJson.inputs ?? null,
-      outputs: this.faustJson.outputs ?? null,
-      params: this.paramsCache,
-      param_paths: this.getParamPaths(),
-      faust_json: this.faustJson,
+      fallbackJson: null,
+      allowFallback: false,
     });
   }
 
@@ -765,19 +833,7 @@ class WorkerRuntime {
       throw new ToolError('invalid_params', 'Missing dsp_json');
     }
 
-    if (this.audioContext) {
-      await this.stop();
-    }
-    this.started = false;
-    this.paramsCache = [];
-    this.meterUnitsByPath = {};
-    this.meterProbesByPath = {};
-    this.faustJson = null;
-    this.dspName = null;
-    this.wasmFactory = null;
-    this.wasmEffectFactory = null;
-    this.polyNvoices = 0;
-    this.midiEnabled = false;
+    await this.prepareForNewGraph();
 
     const parsedJson = typeof dsp_json === 'string' ? JSON.parse(dsp_json) : dsp_json;
     const jsonStr = typeof dsp_json === 'string' ? dsp_json : JSON.stringify(dsp_json);
@@ -785,9 +841,7 @@ class WorkerRuntime {
     this.midiEnabled = midiEnabled;
     this.polyNvoices = nvoices > 0 ? nvoices : 0;
 
-    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
-    const AudioContext = this.compilerManager.AudioContext;
-    this.audioContext = new AudioContext({ latencyHint: hint });
+    const hint = this.initAudioContext(latency_hint);
 
     const wasmBytes = Buffer.from(wasm_base64, 'base64');
     const wasmModule = await WebAssembly.compile(wasmBytes);
@@ -816,26 +870,19 @@ class WorkerRuntime {
     }
 
     if (this.polyNvoices > 0) {
-      const polyGenerator = this.compilerManager.createPolyGenerator();
-      const isDouble = parsedJson?.compile_options?.includes('-double');
-      const { mixerModule } = await this.compilerManager.compiler.getAsyncInternalMixerModule(
-        !!isDouble,
-      );
-      this.faustNode = await polyGenerator.createNode(
-        this.audioContext,
-        this.polyNvoices,
-        name || parsedJson?.name || 'faust-rt',
+      this.faustNode = await this.createFaustNode({
         wasmFactory,
-        mixerModule,
-        effectFactory || undefined,
-      );
+        effectFactory,
+        parsedJson,
+        name,
+      });
     } else {
-      const monoGenerator = this.compilerManager.createGenerator();
-      this.faustNode = await monoGenerator.createNode(
-        this.audioContext,
-        name || parsedJson?.name || 'faust-rt',
+      this.faustNode = await this.createFaustNode({
         wasmFactory,
-      );
+        effectFactory: null,
+        parsedJson,
+        name,
+      });
     }
 
     if (!this.faustNode) {
@@ -845,56 +892,14 @@ class WorkerRuntime {
     this.wasmFactory = wasmFactory;
     this.wasmEffectFactory = effectFactory;
 
-    this.outputParamsCache = {};
-    this.inputParamsCache = {};
-    this.metricsCollector.setMeterCaches({
-      outputParamsCache: this.outputParamsCache,
-      meterUnitsByPath: this.meterUnitsByPath,
-      meterProbesByPath: this.meterProbesByPath,
-    });
-    if (typeof this.faustNode.setOutputParamHandler === 'function') {
-      this.faustNode.setOutputParamHandler((path, value) => {
-        this.outputParamsCache[path] = value;
-      });
-    }
-    if (typeof this.faustNode.setInputParamHandler === 'function') {
-      this.faustNode.setInputParamHandler((path, value) => {
-        this.inputParamsCache[path] = value;
-      });
-    }
+    this.attachParamHandlers();
+    this.tryStartNode();
 
-    try {
-      this.faustNode.start();
-    } catch (_) {}
-
-    let resolvedJson = parsedJson;
-    try {
-      const runtimeJson = this.faustNode.getJSON();
-      if (runtimeJson) {
-        resolvedJson = JSON.parse(runtimeJson);
-      }
-    } catch (_) {}
-    this.faustJson = resolvedJson;
-    this.dspName = this.faustJson?.name || name || null;
-    this.paramsCache = extractParamsFromJson(this.faustJson);
-    this.meterUnitsByPath = extractBargraphUnits(this.faustJson);
-    this.meterProbesByPath = extractBargraphProbes(this.faustJson);
-    this.metricsCollector.setMeterCaches({
-      outputParamsCache: this.outputParamsCache,
-      meterUnitsByPath: this.meterUnitsByPath,
-      meterProbesByPath: this.meterProbesByPath,
-    });
-    this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
-
-    return this.withSchema({
-      status: 'compiled',
-      name: this.dspName,
-      latency_hint: hint,
-      inputs: this.faustJson?.inputs ?? null,
-      outputs: this.faustJson?.outputs ?? null,
-      params: this.paramsCache,
-      param_paths: this.getParamPaths(),
-      faust_json: this.faustJson,
+    return this.finalizeRuntimeState({
+      hint,
+      name,
+      fallbackJson: parsedJson,
+      allowFallback: true,
     });
   }
 

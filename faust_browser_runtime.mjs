@@ -763,6 +763,127 @@ export function createBrowserRuntime(options = {}) {
     return compiled;
   }
 
+  async function prepareForNewGraph() {
+    if (state.audio_context) {
+      await stop();
+    } else {
+      resetState();
+    }
+  }
+
+  function initAudioContext(latency_hint) {
+    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
+    const AudioContextClass = getAudioContextClass();
+    if (!AudioContextClass) {
+      throw new ToolError('audio_context_missing', 'WebAudio is not available');
+    }
+    state.audio_context = new AudioContextClass({ latencyHint: hint });
+    return hint;
+  }
+
+  async function createFaustNode({ wasmFactory, effectFactory, parsedJson, name }) {
+    if (state.poly_nvoices > 0) {
+      const polyGenerator = compilerManager.createPolyGenerator();
+      const isDouble = parsedJson?.compile_options?.includes('-double');
+      const { mixerModule } = await compilerManager.compiler.getAsyncInternalMixerModule(
+        !!isDouble,
+      );
+      return polyGenerator.createNode(
+        state.audio_context,
+        state.poly_nvoices,
+        name || parsedJson?.name || 'faust-browser',
+        wasmFactory,
+        mixerModule,
+        effectFactory || undefined,
+      );
+    }
+    const monoGenerator = compilerManager.createGenerator();
+    return monoGenerator.createNode(
+      state.audio_context,
+      name || parsedJson?.name || 'faust-browser',
+      wasmFactory,
+    );
+  }
+
+  function attachParamHandlers() {
+    state.output_params_cache = {};
+    state.input_params_cache = {};
+    metricsCollector.setMeterCaches({
+      outputParamsCache: state.output_params_cache,
+      meterUnitsByPath: state.meter_units_by_path,
+      meterProbesByPath: state.meter_probes_by_path,
+    });
+
+    if (typeof state.faust_node.setOutputParamHandler === 'function') {
+      state.faust_node.setOutputParamHandler((path, value) => {
+        state.output_params_cache[path] = value;
+      });
+    }
+
+    if (typeof state.faust_node.setInputParamHandler === 'function') {
+      state.faust_node.setInputParamHandler((path, value) => {
+        state.input_params_cache[path] = value;
+      });
+    }
+  }
+
+  function tryStartNode() {
+    if (typeof state.faust_node.start === 'function') {
+      try {
+        state.faust_node.start();
+      } catch (_) {}
+    }
+  }
+
+  function resolveRuntimeJson({ fallback, allowFallback }) {
+    try {
+      const runtimeJson = state.faust_node.getJSON();
+      if (runtimeJson) {
+        return JSON.parse(runtimeJson);
+      }
+    } catch (err) {
+      if (!allowFallback) {
+        throw err;
+      }
+    }
+    if (!allowFallback) {
+      throw new Error('Failed to read Faust JSON from runtime');
+    }
+    return fallback;
+  }
+
+  function finalizeRuntimeState({ hint, name, fallbackJson, allowFallback }) {
+    const resolvedJson = resolveRuntimeJson({ fallback: fallbackJson, allowFallback });
+    state.dsp_json = resolvedJson;
+    state.name = state.dsp_json?.name || name || null;
+    state.params = extractParamsFromJson(state.dsp_json);
+    state.meter_units_by_path = extractBargraphUnits(state.dsp_json);
+    state.meter_probes_by_path = extractBargraphProbes(state.dsp_json);
+    metricsCollector.setMeterCaches({
+      outputParamsCache: state.output_params_cache,
+      meterUnitsByPath: state.meter_units_by_path,
+      meterProbesByPath: state.meter_probes_by_path,
+    });
+    metricsCollector.attach(state.audio_context, state.faust_node, state.dsp_json);
+
+    state.status = 'compiled';
+
+    return buildRuntimeResponse({ hint, name });
+  }
+
+  function buildRuntimeResponse({ hint, name }) {
+    return withSchema({
+      status: 'compiled',
+      name: state.name || name,
+      latency_hint: hint,
+      inputs: state.dsp_json?.inputs ?? null,
+      outputs: state.dsp_json?.outputs ?? null,
+      params: state.params,
+      param_paths: getParamPaths(),
+      faust_json: state.dsp_json,
+    });
+  }
+
   /**
    * Internal compile pipeline (shared by compile and compile_and_start).
    */
@@ -780,17 +901,8 @@ export function createBrowserRuntime(options = {}) {
       throw new ToolError('invalid_params', 'Missing dsp_code');
     }
 
-    if (state.audio_context) {
-      await stop();
-    }
-    resetState();
-
-    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
-    const AudioContextClass = getAudioContextClass();
-    if (!AudioContextClass) {
-      throw new ToolError('audio_context_missing', 'WebAudio is not available');
-    }
-    state.audio_context = new AudioContextClass({ latencyHint: hint });
+    await prepareForNewGraph();
+    const hint = initAudioContext(latency_hint);
 
     const monoGenerator = compilerManager.createGenerator();
     let wrapped = null;
@@ -848,74 +960,37 @@ export function createBrowserRuntime(options = {}) {
       }
       state.wasm_factory = polyGenerator.voiceFactory || null;
       state.wasm_effect_factory = polyGenerator.effectFactory || null;
-      state.faust_node = await polyGenerator.createNode(
-        state.audio_context,
-        state.poly_nvoices,
+      state.faust_node = await createFaustNode({
+        wasmFactory: state.wasm_factory,
+        effectFactory: state.wasm_effect_factory,
+        parsedJson: metaJson,
         name,
-      );
+      });
     } else {
       state.wasm_factory = monoGenerator.factory || null;
       state.wasm_effect_factory = null;
-      state.faust_node = await monoGenerator.createNode(state.audio_context);
+      state.faust_node = await createFaustNode({
+        wasmFactory: state.wasm_factory,
+        effectFactory: null,
+        parsedJson: metaJson,
+        name,
+      });
     }
 
     if (!state.faust_node) {
       throw new ToolError('node_create_failed', 'Failed to create Faust node');
     }
 
-    state.output_params_cache = {};
-    state.input_params_cache = {};
-    state.meter_units_by_path = {};
-    state.meter_probes_by_path = {};
-    metricsCollector.setMeterCaches({
-      outputParamsCache: state.output_params_cache,
-      meterUnitsByPath: state.meter_units_by_path,
-      meterProbesByPath: state.meter_probes_by_path,
-    });
+    attachParamHandlers();
+    tryStartNode();
 
-    if (typeof state.faust_node.setOutputParamHandler === 'function') {
-      state.faust_node.setOutputParamHandler((path, value) => {
-        state.output_params_cache[path] = value;
-      });
-    }
-
-    if (typeof state.faust_node.setInputParamHandler === 'function') {
-      state.faust_node.setInputParamHandler((path, value) => {
-        state.input_params_cache[path] = value;
-      });
-    }
-
-    if (typeof state.faust_node.start === 'function') {
-      try {
-        state.faust_node.start();
-      } catch (_) {}
-    }
-
-    const jsonStr = state.faust_node.getJSON();
-    state.dsp_json = JSON.parse(jsonStr);
-    state.name = state.dsp_json?.name || name || null;
-    state.params = extractParamsFromJson(state.dsp_json);
-    state.meter_units_by_path = extractBargraphUnits(state.dsp_json);
-    state.meter_probes_by_path = extractBargraphProbes(state.dsp_json);
-    metricsCollector.setMeterCaches({
-      outputParamsCache: state.output_params_cache,
-      meterUnitsByPath: state.meter_units_by_path,
-      meterProbesByPath: state.meter_probes_by_path,
-    });
-    metricsCollector.attach(state.audio_context, state.faust_node, state.dsp_json);
-
-    state.status = 'compiled';
     state.dsp_code = dsp_code;
 
-    return withSchema({
-      status: 'compiled',
+    return finalizeRuntimeState({
+      hint,
       name,
-      latency_hint: hint,
-      inputs: state.dsp_json.inputs ?? null,
-      outputs: state.dsp_json.outputs ?? null,
-      params: state.params,
-      param_paths: getParamPaths(),
-      faust_json: state.dsp_json,
+      fallbackJson: null,
+      allowFallback: false,
     });
   }
 
@@ -1060,10 +1135,7 @@ export function createBrowserRuntime(options = {}) {
       throw new ToolError('invalid_params', 'Missing dsp_json');
     }
 
-    if (state.audio_context) {
-      await stop();
-    }
-    resetState();
+    await prepareForNewGraph();
 
     const parsedJson = typeof dsp_json === 'string' ? JSON.parse(dsp_json) : dsp_json;
     const jsonStr = typeof dsp_json === 'string' ? dsp_json : JSON.stringify(dsp_json);
@@ -1071,12 +1143,7 @@ export function createBrowserRuntime(options = {}) {
     state.midi_enabled = midiEnabled;
     state.poly_nvoices = nvoices > 0 ? nvoices : 0;
 
-    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
-    const AudioContextClass = getAudioContextClass();
-    if (!AudioContextClass) {
-      throw new ToolError('audio_context_missing', 'WebAudio is not available');
-    }
-    state.audio_context = new AudioContextClass({ latencyHint: hint });
+    const hint = initAudioContext(latency_hint);
 
     const wasmBytes = base64ToBytes(wasm_base64);
     const wasmModule = await WebAssembly.compile(wasmBytes);
@@ -1105,26 +1172,19 @@ export function createBrowserRuntime(options = {}) {
     }
 
     if (state.poly_nvoices > 0) {
-      const polyGenerator = compilerManager.createPolyGenerator();
-      const isDouble = parsedJson?.compile_options?.includes('-double');
-      const { mixerModule } = await compilerManager.compiler.getAsyncInternalMixerModule(
-        !!isDouble,
-      );
-      state.faust_node = await polyGenerator.createNode(
-        state.audio_context,
-        state.poly_nvoices,
-        name || parsedJson?.name || 'faust-browser',
+      state.faust_node = await createFaustNode({
         wasmFactory,
-        mixerModule,
-        effectFactory || undefined,
-      );
+        effectFactory,
+        parsedJson,
+        name,
+      });
     } else {
-      const monoGenerator = compilerManager.createGenerator();
-      state.faust_node = await monoGenerator.createNode(
-        state.audio_context,
-        name || parsedJson?.name || 'faust-browser',
+      state.faust_node = await createFaustNode({
         wasmFactory,
-      );
+        effectFactory: null,
+        parsedJson,
+        name,
+      });
     }
 
     if (!state.faust_node) {
@@ -1134,58 +1194,14 @@ export function createBrowserRuntime(options = {}) {
     state.wasm_factory = wasmFactory;
     state.wasm_effect_factory = effectFactory;
 
-    state.output_params_cache = {};
-    state.input_params_cache = {};
-    metricsCollector.setMeterCaches({
-      outputParamsCache: state.output_params_cache,
-      meterUnitsByPath: state.meter_units_by_path,
-      meterProbesByPath: state.meter_probes_by_path,
-    });
-    if (typeof state.faust_node.setOutputParamHandler === 'function') {
-      state.faust_node.setOutputParamHandler((path, value) => {
-        state.output_params_cache[path] = value;
-      });
-    }
-    if (typeof state.faust_node.setInputParamHandler === 'function') {
-      state.faust_node.setInputParamHandler((path, value) => {
-        state.input_params_cache[path] = value;
-      });
-    }
+    attachParamHandlers();
+    tryStartNode();
 
-    try {
-      state.faust_node.start();
-    } catch (_) {}
-
-    let resolvedJson = parsedJson;
-    try {
-      const runtimeJson = state.faust_node.getJSON();
-      if (runtimeJson) {
-        resolvedJson = JSON.parse(runtimeJson);
-      }
-    } catch (_) {}
-    state.dsp_json = resolvedJson;
-    state.name = state.dsp_json?.name || name || null;
-    state.params = extractParamsFromJson(state.dsp_json);
-    state.meter_units_by_path = extractBargraphUnits(state.dsp_json);
-    state.meter_probes_by_path = extractBargraphProbes(state.dsp_json);
-    metricsCollector.setMeterCaches({
-      outputParamsCache: state.output_params_cache,
-      meterUnitsByPath: state.meter_units_by_path,
-      meterProbesByPath: state.meter_probes_by_path,
-    });
-    metricsCollector.attach(state.audio_context, state.faust_node, state.dsp_json);
-
-    state.status = 'compiled';
-
-    return withSchema({
-      status: 'compiled',
-      name: state.name,
-      latency_hint: hint,
-      inputs: state.dsp_json?.inputs ?? null,
-      outputs: state.dsp_json?.outputs ?? null,
-      params: state.params,
-      param_paths: getParamPaths(),
-      faust_json: state.dsp_json,
+    return finalizeRuntimeState({
+      hint,
+      name,
+      fallbackJson: parsedJson,
+      allowFallback: true,
     });
   }
 

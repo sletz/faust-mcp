@@ -532,13 +532,7 @@ class RtBrowserUiApp {
     this.setStatus('Compiling DSP...');
     try {
       const compiled = await this.runtime.compile_and_start(code);
-      await this.mountFaustUi(compiled?.faust_json);
-      await this.updateStatusFromRuntime();
-      await this.updateScopeFromRuntime();
-      await this.refreshMidiInputs();
-      await this.refreshProbeData();
-      this.resetDiagram();
-      await this.setDiagramVisibility(true, { load: true });
+      await this.refreshUiAfterLoad({ faustJson: compiled?.faust_json });
       this.setStatus('Running.');
       if (statusNode) statusNode.textContent = 'Running.';
     } catch (err) {
@@ -578,6 +572,27 @@ class RtBrowserUiApp {
       }
       this.updatePolyActivity(status);
     } catch (_) {}
+  }
+
+  async refreshUiAfterLoad({ faustJson } = {}) {
+    let resolvedJson = faustJson;
+    if (!resolvedJson) {
+      try {
+        const payload = await this.runtime.get_dsp_json();
+        resolvedJson = payload?.faust_json || payload?.faustJson || null;
+      } catch (_) {
+        resolvedJson = null;
+      }
+    }
+    if (resolvedJson) {
+      await this.mountFaustUi(resolvedJson);
+    }
+    await this.updateStatusFromRuntime();
+    await this.updateScopeFromRuntime();
+    await this.refreshMidiInputs();
+    await this.refreshProbeData();
+    this.resetDiagram();
+    await this.setDiagramVisibility(true, { load: true });
   }
 
   /**
@@ -1368,20 +1383,7 @@ class RtBrowserUiApp {
    */
   async applyBridgeSideEffects(method, result) {
     if (method === 'compile' || method === 'compile_and_start' || method === 'load_wasm_module') {
-      let faustJson = result?.faust_json || result?.faustJson;
-      if (!faustJson) {
-        const payload = await this.runtime.get_dsp_json();
-        faustJson = payload?.faust_json || payload?.faustJson;
-      }
-      if (faustJson) {
-        await this.mountFaustUi(faustJson);
-      }
-      await this.updateStatusFromRuntime();
-      await this.updateScopeFromRuntime();
-      await this.refreshMidiInputs();
-      await this.refreshProbeData();
-      this.resetDiagram();
-      await this.setDiagramVisibility(true, { load: true });
+      await this.refreshUiAfterLoad({ faustJson: result?.faust_json || result?.faustJson });
       this.setStatus('Running.');
     } else if (method === 'start') {
       await this.updateStatusFromRuntime();
