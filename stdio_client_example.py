@@ -5,6 +5,7 @@ and prints the result.
 """
 
 import argparse
+import base64
 import os
 
 import anyio
@@ -26,6 +27,10 @@ async def main(
     param_path: str | None,
     param_value: float | None,
     param_values: list[str] | None,
+    wasm_path: str | None,
+    dsp_json_path: str | None,
+    effect_wasm_path: str | None,
+    effect_dsp_json_path: str | None,
 ) -> None:
     """Run the stdio MCP client and call the requested tool.
 
@@ -94,7 +99,22 @@ async def main(
                 if not param_path or param_value is None:
                     raise ValueError("--param-path and --param-value are required for set_param")
                 args = {"path": param_path, "value": param_value}
-            elif tool in ("get_params", "get_audio_metrics", "stop"):
+            elif tool == "load_wasm_module":
+                if not wasm_path or not dsp_json_path:
+                    raise ValueError("--wasm and --dsp-json are required for load_wasm_module")
+                with open(wasm_path, "rb") as f:
+                    wasm_base64 = base64.b64encode(f.read()).decode("ascii")
+                with open(dsp_json_path, "r", encoding="utf-8") as f:
+                    dsp_json = f.read()
+                args = {"wasm_base64": wasm_base64, "dsp_json": dsp_json}
+                if effect_wasm_path and effect_dsp_json_path:
+                    with open(effect_wasm_path, "rb") as f:
+                        effect_wasm_base64 = base64.b64encode(f.read()).decode("ascii")
+                    with open(effect_dsp_json_path, "r", encoding="utf-8") as f:
+                        effect_dsp_json = f.read()
+                    args["effect_wasm_base64"] = effect_wasm_base64
+                    args["effect_dsp_json"] = effect_dsp_json
+            elif tool in ("get_params", "get_dsp_json", "save_wasm_module", "get_audio_metrics", "stop"):
                 args = {}
             else:
                 raise ValueError(f"Unsupported tool: {tool}")
@@ -114,7 +134,27 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, get_audio_metrics, set_param_values, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, get_audio_metrics, set_param_values, set_param, stop).",
+    )
+    parser.add_argument(
+        "--wasm",
+        default=None,
+        help="Path to a compiled DSP wasm file for load_wasm_module.",
+    )
+    parser.add_argument(
+        "--dsp-json",
+        default=None,
+        help="Path to the compiled DSP JSON file for load_wasm_module.",
+    )
+    parser.add_argument(
+        "--effect-wasm",
+        default=None,
+        help="Path to the effect DSP wasm file for load_wasm_module (poly).",
+    )
+    parser.add_argument(
+        "--effect-dsp-json",
+        default=None,
+        help="Path to the effect DSP JSON file for load_wasm_module (poly).",
     )
     parser.add_argument(
         "--name",
@@ -184,4 +224,8 @@ if __name__ == "__main__":
         args.param_path,
         args.param_value,
         args.param_values,
+        args.wasm,
+        args.dsp_json,
+        args.effect_wasm,
+        args.effect_dsp_json,
     )

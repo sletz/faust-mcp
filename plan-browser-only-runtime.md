@@ -9,7 +9,7 @@
 
 ## Non-Goals
 
-- No changes to `faust_node_server.py`, `faust_node_worker.mjs`, or `ui/rt-ui.*`.
+- No changes to `faust_node_server.py`, `faust_node_worker.mjs`, or `ui/rt-node-ui.*`.
 - No Node process for DSP/runtime in this architecture.
 - No attempt to run WebAudio headlessly.
 
@@ -24,7 +24,7 @@ or modify them. All new files are separate and can be run independently.
 - `faust_browser_runtime.mjs`: Browser runtime module (compile/start/stop + metrics).
 - `ui/rt-browser-ui.html`: Browser-only UI entrypoint.
 - `ui/rt-browser-ui.js`: Browser-only UI logic (no HTTP polling).
-- `ui/rt-browser-ui.css`: Browser-only CSS (can import `rt-ui.css`).
+- `ui/rt-browser-ui.css`: Browser-only CSS (can import `rt-node-ui.css`).
 
 ## Target Architecture (Browser Runtime + Optional Proxy)
 
@@ -113,10 +113,10 @@ clients remain compatible.
 ### Phase 2 - Browser UI (`ui/rt-browser-ui.*`)
 
 1. **HTML**
-   - Copy the structure of `ui/rt-ui.html` (same IDs/classes).
+   - Copy the structure of `ui/rt-node-ui.html` (same IDs/classes).
    - Update the title and script link to `rt-browser-ui.js`.
 2. **CSS**
-   - Import `rt-ui.css` or clone it to allow runtime-specific tweaks.
+   - Import `rt-node-ui.css` or clone it to allow runtime-specific tweaks.
 3. **JS wiring**
    - Replace HTTP polling with calls into `faust_browser_runtime.mjs`.
    - Use the same UI rendering flow for params, scope, spectrum, and probes.

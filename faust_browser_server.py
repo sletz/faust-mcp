@@ -287,6 +287,37 @@ def get_audio_metrics(
 
 
 @mcp.tool()
+def load_wasm_module(
+    wasm_base64: str,
+    dsp_json: dict | str,
+    effect_wasm_base64: str | None = None,
+    effect_dsp_json: dict | str | None = None,
+    name: str | None = None,
+    latency_hint: str = "interactive",
+) -> str:
+    """Load a pre-compiled WebAssembly module (base64) for the current DSP."""
+    result = _call_bridge(
+        "load_wasm_module",
+        {
+            "wasm_base64": wasm_base64,
+            "dsp_json": dsp_json,
+            "effect_wasm_base64": effect_wasm_base64,
+            "effect_dsp_json": effect_dsp_json,
+            "name": name,
+            "latency_hint": latency_hint,
+        },
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def save_wasm_module() -> str:
+    """Return the compiled WebAssembly module for the current DSP (base64)."""
+    result = _call_bridge("save_wasm_module")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 def get_midi_inputs() -> str:
     """List MIDI inputs from the browser runtime."""
     result = _call_bridge("get_midi_inputs")
@@ -332,7 +363,7 @@ def _make_handler(ui_index: str, directory: str, ui_root: str):
                 rel = rel.split("?", 1)[0].split("#", 1)[0]
                 rel = posixpath.normpath(rel).lstrip("/")
                 return os.path.join(ui_root, "assets", rel)
-            if path in ("/rt-browser-ui.js", "/rt-browser-ui.css", "/rt-browser-ui.html", "/rt-ui.css"):
+            if path in ("/rt-browser-ui.js", "/rt-browser-ui.css", "/rt-browser-ui.html"):
                 rel = path.lstrip("/")
                 return os.path.join(ui_root, rel)
             return super().translate_path(path)

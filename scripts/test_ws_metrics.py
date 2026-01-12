@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple WebSocket metrics probe for the rt-ui analysis stream.
+"""Simple WebSocket metrics probe for the rt-node-ui analysis stream.
 
 Connects to the /ws endpoint, sends a subscribe message, and waits for
 at least one metrics frame. Useful for manual checks or CI smoke tests.

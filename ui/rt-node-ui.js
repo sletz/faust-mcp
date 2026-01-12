@@ -1,4 +1,4 @@
-// rt-ui client: renders Faust UI, keeps params/meters in sync, and manages MIDI/scopes/probes.
+// rt-node-ui client: renders Faust UI, keeps params/meters in sync, and manages MIDI/scopes/probes.
 class RtUiApp {
   /**
    * @param {object} [options]
@@ -113,7 +113,7 @@ class RtUiApp {
       this.dom.compactToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
     }
     try {
-      localStorage.setItem('rt-ui-compact', enabled ? '1' : '0');
+      localStorage.setItem('rt-node-ui-compact', enabled ? '1' : '0');
     } catch (_) {}
     this.updateFaustUiScale();
   }
@@ -129,14 +129,14 @@ class RtUiApp {
       this.dom.analysisToggle.textContent = visible ? 'Hide Analysis' : 'Show Analysis';
     }
     try {
-      localStorage.setItem('rt-ui-analysis-hidden', visible ? '0' : '1');
+      localStorage.setItem('rt-node-ui-analysis-hidden', visible ? '0' : '1');
     } catch (_) {}
   }
 
   // Restore compact mode from localStorage on load.
   restoreCompactMode() {
     try {
-      const value = localStorage.getItem('rt-ui-compact');
+      const value = localStorage.getItem('rt-node-ui-compact');
       this.setCompactMode(value === '1');
     } catch (_) {
       this.setCompactMode(false);
@@ -146,7 +146,7 @@ class RtUiApp {
   // Restore analysis column visibility from localStorage on load.
   restoreAnalysisVisibility() {
     try {
-      const value = localStorage.getItem('rt-ui-analysis-hidden');
+      const value = localStorage.getItem('rt-node-ui-analysis-hidden');
       this.setAnalysisVisibility(value !== '1');
     } catch (_) {
       this.setAnalysisVisibility(true);
@@ -158,7 +158,7 @@ class RtUiApp {
     const root = this.dom.appShell;
     if (!root) return;
     try {
-      const value = localStorage.getItem('rt-ui-left-column-width');
+      const value = localStorage.getItem('rt-node-ui-left-column-width');
       if (!value) return;
       const parsed = Number(value);
       if (!Number.isFinite(parsed)) return;
@@ -218,7 +218,7 @@ class RtUiApp {
         const value = getComputedStyle(this.dom.appShell).getPropertyValue('--left-column-width');
         const parsed = Number.parseFloat(value);
         if (Number.isFinite(parsed)) {
-          localStorage.setItem('rt-ui-left-column-width', String(parsed));
+          localStorage.setItem('rt-node-ui-left-column-width', String(parsed));
         }
       } catch (_) {}
     });

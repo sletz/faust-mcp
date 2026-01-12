@@ -1,4 +1,4 @@
-# WebSocket Metrics Stream (rt-ui)
+# WebSocket Metrics Stream (rt-node-ui)
 
 This document explains how the real-time UI receives analysis data over WebSocket
 and how the server behaves. It is meant for readers who are new to WebSockets or
@@ -19,16 +19,16 @@ at a controlled cadence.
 5. If WS is unavailable, the UI falls back to HTTP polling.
 
 ```
-rt-ui.js  ->  /ws (subscribe)
+rt-node-ui.js  ->  /ws (subscribe)
 server    ->  get_audio_metrics()
 server    ->  /ws (metrics)
-rt-ui.js  ->  render scope/spectrum/probe
+rt-node-ui.js  ->  render scope/spectrum/probe
 ```
 
 ## Where It Lives
 
 - Server: `ws_metrics_server.mjs`
-- Client: `ui/rt-ui.js`
+- Client: `ui/rt-node-ui.js`
 - HTTP fallback: `GET /audio-metrics`
 
 ## Connection Basics

@@ -1316,6 +1316,7 @@ class RtBrowserUiApp {
           'input_file',
           'hide_meters',
         ],
+        save_wasm_module: [],
         get_param: ['path'],
         set_param: ['path', 'value'],
         set_param_values: ['values'],
@@ -1338,6 +1339,8 @@ class RtBrowserUiApp {
         result = await this.runtime[method](...args);
       } else if (Array.isArray(params)) {
         result = await this.runtime[method](...params);
+      } else if (params && typeof params === 'object') {
+        result = await this.runtime[method](params);
       } else {
         result = await this.runtime[method]();
       }
@@ -1364,7 +1367,7 @@ class RtBrowserUiApp {
    * @param {object} result
    */
   async applyBridgeSideEffects(method, result) {
-    if (method === 'compile' || method === 'compile_and_start') {
+    if (method === 'compile' || method === 'compile_and_start' || method === 'load_wasm_module') {
       let faustJson = result?.faust_json || result?.faustJson;
       if (!faustJson) {
         const payload = await this.runtime.get_dsp_json();

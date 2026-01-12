@@ -81,6 +81,37 @@ function joinUrl(root, path) {
 }
 
 /**
+ * Convert a Uint8Array into a base64 string.
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function bytesToBase64(bytes) {
+  if (!bytes || !bytes.length) return '';
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const slice = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Convert a base64 string into a Uint8Array.
+ * @param {string} base64
+ * @returns {Uint8Array}
+ */
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Loader for Faust WASM + compiler classes in the browser.
  */
 class FaustBrowserCompilerManager {
@@ -604,6 +635,8 @@ export function createBrowserRuntime(options = {}) {
     poly_nvoices: 0,
     midi_enabled: false,
     started: false,
+    wasm_factory: null,
+    wasm_effect_factory: null,
     svg_diagrams: null,
     svg_key: null,
   };
@@ -643,6 +676,8 @@ export function createBrowserRuntime(options = {}) {
     state.poly_nvoices = 0;
     state.midi_enabled = false;
     state.started = false;
+    state.wasm_factory = null;
+    state.wasm_effect_factory = null;
     state.svg_diagrams = null;
     state.svg_key = null;
     metricsCollector.reset();
@@ -811,12 +846,16 @@ export function createBrowserRuntime(options = {}) {
           stage: 'poly',
         });
       }
+      state.wasm_factory = polyGenerator.voiceFactory || null;
+      state.wasm_effect_factory = polyGenerator.effectFactory || null;
       state.faust_node = await polyGenerator.createNode(
         state.audio_context,
         state.poly_nvoices,
         name,
       );
     } else {
+      state.wasm_factory = monoGenerator.factory || null;
+      state.wasm_effect_factory = null;
       state.faust_node = await monoGenerator.createNode(state.audio_context);
     }
 
@@ -958,6 +997,196 @@ export function createBrowserRuntime(options = {}) {
   async function get_dsp_json() {
     ensureRunning();
     return withSchema({ status: 'ok', faust_json: state.dsp_json });
+  }
+
+  /**
+   * Return the compiled WebAssembly module for the current DSP (base64).
+   */
+  async function save_wasm_module() {
+    if (!state.wasm_factory) {
+      throw new ToolError('no_dsp', 'No compiled DSP. Call compile or compile_and_start first.');
+    }
+    const wasmCode = state.wasm_factory.code;
+    if (!wasmCode) {
+      throw new ToolError('wasm_unavailable', 'WASM module is not available.');
+    }
+    let dspJson = state.dsp_json || null;
+    if (state.wasm_factory?.json) {
+      try {
+        dspJson = JSON.parse(state.wasm_factory.json);
+      } catch (_) {
+        dspJson = state.dsp_json || null;
+      }
+    }
+    const payload = {
+      status: 'ok',
+      poly: state.poly_nvoices > 0,
+      sha_key: state.wasm_factory.shaKey || null,
+      wasm_base64: bytesToBase64(wasmCode),
+      bytes: wasmCode.length,
+      dsp_json: dspJson,
+    };
+    if (state.wasm_effect_factory?.code) {
+      let effectJson = state.wasm_effect_factory?.json ?? state.dsp_json?.effect ?? null;
+      if (typeof effectJson === 'string') {
+        try {
+          effectJson = JSON.parse(effectJson);
+        } catch (_) {}
+      }
+      payload.effect_sha_key = state.wasm_effect_factory.shaKey || null;
+      payload.effect_wasm_base64 = bytesToBase64(state.wasm_effect_factory.code);
+      payload.effect_bytes = state.wasm_effect_factory.code.length;
+      payload.effect_dsp_json = effectJson;
+    }
+    return withSchema(payload);
+  }
+
+  /**
+   * Load a pre-compiled WebAssembly module and create the DSP node.
+   */
+  async function load_wasm_module({
+    wasm_base64,
+    dsp_json,
+    effect_wasm_base64,
+    effect_dsp_json,
+    name = state.name,
+    latency_hint = state.latency_hint,
+  } = {}) {
+    await compilerManager.ensureReady();
+    if (!wasm_base64) {
+      throw new ToolError('invalid_params', 'Missing wasm_base64');
+    }
+    if (!dsp_json) {
+      throw new ToolError('invalid_params', 'Missing dsp_json');
+    }
+
+    if (state.audio_context) {
+      await stop();
+    }
+    resetState();
+
+    const parsedJson = typeof dsp_json === 'string' ? JSON.parse(dsp_json) : dsp_json;
+    const jsonStr = typeof dsp_json === 'string' ? dsp_json : JSON.stringify(dsp_json);
+    const { midiEnabled, nvoices } = extractMidiAndNvoices(parsedJson?.meta);
+    state.midi_enabled = midiEnabled;
+    state.poly_nvoices = nvoices > 0 ? nvoices : 0;
+
+    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
+    const AudioContextClass = getAudioContextClass();
+    if (!AudioContextClass) {
+      throw new ToolError('audio_context_missing', 'WebAudio is not available');
+    }
+    state.audio_context = new AudioContextClass({ latencyHint: hint });
+
+    const wasmBytes = base64ToBytes(wasm_base64);
+    const wasmModule = await WebAssembly.compile(wasmBytes);
+    const wasmFactory = {
+      cfactory: 0,
+      code: wasmBytes,
+      module: wasmModule,
+      json: jsonStr,
+      poly: state.poly_nvoices > 0,
+    };
+
+    let effectFactory = null;
+    if (effect_wasm_base64 && effect_dsp_json) {
+      const effectJsonStr = typeof effect_dsp_json === 'string'
+        ? effect_dsp_json
+        : JSON.stringify(effect_dsp_json);
+      const effectBytes = base64ToBytes(effect_wasm_base64);
+      const effectModule = await WebAssembly.compile(effectBytes);
+      effectFactory = {
+        cfactory: 0,
+        code: effectBytes,
+        module: effectModule,
+        json: effectJsonStr,
+        poly: true,
+      };
+    }
+
+    if (state.poly_nvoices > 0) {
+      const polyGenerator = compilerManager.createPolyGenerator();
+      const isDouble = parsedJson?.compile_options?.includes('-double');
+      const { mixerModule } = await compilerManager.compiler.getAsyncInternalMixerModule(
+        !!isDouble,
+      );
+      state.faust_node = await polyGenerator.createNode(
+        state.audio_context,
+        state.poly_nvoices,
+        name || parsedJson?.name || 'faust-browser',
+        wasmFactory,
+        mixerModule,
+        effectFactory || undefined,
+      );
+    } else {
+      const monoGenerator = compilerManager.createGenerator();
+      state.faust_node = await monoGenerator.createNode(
+        state.audio_context,
+        name || parsedJson?.name || 'faust-browser',
+        wasmFactory,
+      );
+    }
+
+    if (!state.faust_node) {
+      throw new ToolError('node_create_failed', 'Failed to create Faust node');
+    }
+
+    state.wasm_factory = wasmFactory;
+    state.wasm_effect_factory = effectFactory;
+
+    state.output_params_cache = {};
+    state.input_params_cache = {};
+    metricsCollector.setMeterCaches({
+      outputParamsCache: state.output_params_cache,
+      meterUnitsByPath: state.meter_units_by_path,
+      meterProbesByPath: state.meter_probes_by_path,
+    });
+    if (typeof state.faust_node.setOutputParamHandler === 'function') {
+      state.faust_node.setOutputParamHandler((path, value) => {
+        state.output_params_cache[path] = value;
+      });
+    }
+    if (typeof state.faust_node.setInputParamHandler === 'function') {
+      state.faust_node.setInputParamHandler((path, value) => {
+        state.input_params_cache[path] = value;
+      });
+    }
+
+    try {
+      state.faust_node.start();
+    } catch (_) {}
+
+    let resolvedJson = parsedJson;
+    try {
+      const runtimeJson = state.faust_node.getJSON();
+      if (runtimeJson) {
+        resolvedJson = JSON.parse(runtimeJson);
+      }
+    } catch (_) {}
+    state.dsp_json = resolvedJson;
+    state.name = state.dsp_json?.name || name || null;
+    state.params = extractParamsFromJson(state.dsp_json);
+    state.meter_units_by_path = extractBargraphUnits(state.dsp_json);
+    state.meter_probes_by_path = extractBargraphProbes(state.dsp_json);
+    metricsCollector.setMeterCaches({
+      outputParamsCache: state.output_params_cache,
+      meterUnitsByPath: state.meter_units_by_path,
+      meterProbesByPath: state.meter_probes_by_path,
+    });
+    metricsCollector.attach(state.audio_context, state.faust_node, state.dsp_json);
+
+    state.status = 'compiled';
+
+    return withSchema({
+      status: 'compiled',
+      name: state.name,
+      latency_hint: hint,
+      inputs: state.dsp_json?.inputs ?? null,
+      outputs: state.dsp_json?.outputs ?? null,
+      params: state.params,
+      param_paths: getParamPaths(),
+      faust_json: state.dsp_json,
+    });
   }
 
   /**
@@ -1137,10 +1366,12 @@ export function createBrowserRuntime(options = {}) {
     check_syntax,
     compile,
     compile_and_start,
+    load_wasm_module,
     start,
     stop,
     get_status,
     get_dsp_json,
+    save_wasm_module,
     get_params,
     get_param,
     get_param_values,

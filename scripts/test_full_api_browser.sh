@@ -11,6 +11,7 @@ GAIN_PATH="${GAIN_PATH:-/gain}"
 FREQ1_PATH="${FREQ1_PATH:-/freq1}"
 FREQ2_PATH="${FREQ2_PATH:-/freq2}"
 REQUIRE_UNLOCK="${REQUIRE_UNLOCK:-1}"
+TMPDIR="${TMPDIR:-./tmp}"
 
 if curl -s -S "${UI_HTTP_BASE}/" >/dev/null; then
   echo "UI reachable at ${UI_HTTP_BASE}"
@@ -45,6 +46,73 @@ python3 sse_client_example.py --url "${URL}" --tool get_midi_status
 
 echo "== get_dsp_json =="
 python3 sse_client_example.py --url "${URL}" --tool get_dsp_json
+
+echo "== save_wasm_module =="
+mkdir -p "${TMPDIR}"
+python3 sse_client_example.py --url "${URL}" --tool save_wasm_module > "${TMPDIR}/wasm_payload.json"
+python3 - <<PY
+import base64
+import json
+import ast
+from pathlib import Path
+
+tmpdir = Path(r"${TMPDIR}")
+payload_path = tmpdir / "wasm_payload.json"
+with payload_path.open("r", encoding="utf-8") as f:
+    raw = f.read()
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    data = ast.literal_eval(raw)
+
+if isinstance(data, str):
+    try:
+        data = json.loads(data)
+    except json.JSONDecodeError:
+        data = ast.literal_eval(data)
+
+for _ in range(6):
+    if isinstance(data, dict) and "result" in data:
+        data = data["result"]
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                data = ast.literal_eval(data)
+    else:
+        break
+if "wasm_base64" not in data:
+    print("DEBUG save_wasm_module payload:", data)
+
+if data.get("error"):
+    raise SystemExit(f"save_wasm_module error: {data['error']}")
+wasm_base64 = data.get("wasm_base64")
+if not wasm_base64:
+    raise SystemExit(f"save_wasm_module: missing wasm_base64 in response (keys: {sorted(data.keys())})")
+
+(tmpdir / "dsp.wasm").write_bytes(base64.b64decode(wasm_base64))
+with (tmpdir / "dsp.json").open("w", encoding="utf-8") as f:
+    json.dump(data.get("dsp_json"), f, indent=2)
+
+if data.get("effect_wasm_base64") and data.get("effect_dsp_json"):
+    (tmpdir / "effect.wasm").write_bytes(base64.b64decode(data["effect_wasm_base64"]))
+    with (tmpdir / "effect.json").open("w", encoding="utf-8") as f:
+        json.dump(data.get("effect_dsp_json"), f, indent=2)
+PY
+
+echo "== load_wasm_module =="
+extra_args=()
+if [[ -f "${TMPDIR}/effect.wasm" && -f "${TMPDIR}/effect.json" ]]; then
+  extra_args=(--effect-wasm "${TMPDIR}/effect.wasm" --effect-dsp-json "${TMPDIR}/effect.json")
+fi
+if [ ${#extra_args[@]} -eq 0 ]; then
+  python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
+    --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json"
+else
+  python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
+    --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
+    "${extra_args[@]}"
+fi
 
 echo "== get_param (gain) =="
 python3 sse_client_example.py --url "${URL}" --tool get_param --param-path "${GAIN_PATH}"

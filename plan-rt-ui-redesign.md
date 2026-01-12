@@ -9,7 +9,7 @@
 
 ## Scope
 
-- Files: `ui/rt-ui.html`, `ui/rt-ui.js`, `ui/rt-ui.css` (or a new `ui/rt-ui.css` if styles are inline today).
+- Files: `ui/rt-node-ui.html`, `ui/rt-node-ui.js`, `ui/rt-node-ui.css` (or a new `ui/rt-node-ui.css` if styles are inline today).
 - JS changes limited to layout hooks (class names, DOM structure) and minor helper functions for UI state.
 - No changes to MCP protocol or backend APIs unless explicitly added.
 
@@ -35,7 +35,7 @@
 ## Implementation Steps
 
 1. **Audit existing DOM structure**
-   - Map IDs/classes referenced in `ui/rt-ui.js`.
+   - Map IDs/classes referenced in `ui/rt-node-ui.js`.
    - Identify which elements can be wrapped or moved without breaking selectors.
    - Note which sections are dynamically created (e.g., Faust UI mount).
    - Current bindings (must remain stable):
@@ -96,7 +96,7 @@
 Goal: replace high‑rate HTTP polling with a push channel for analysis data.
 
 1. **Server endpoint placement**
-   - Prefer adding WS to the same HTTP server that serves `rt-ui` (currently `faust_node_server.py`).
+   - Prefer adding WS to the same HTTP server that serves `rt-node-ui` (currently `faust_node_server.py`).
    - If a dedicated Node UI server exists in the future, reuse the same WS message format.
 2. **Server behavior**
    - Add a `/ws` endpoint, local‑only by default (same origin).
@@ -106,7 +106,7 @@ Goal: replace high‑rate HTTP polling with a push channel for analysis data.
    - Push analysis frames at server‑controlled rates (e.g., scope 5–10 fps, spectrum 1–2 fps).
    - Include `schema_version`, `timestamp_ms`, and `source` (mix/channel) in each frame.
 3. **Client**
-   - Add a small WS client in `ui/rt-ui.js` with automatic reconnect.
+   - Add a small WS client in `ui/rt-node-ui.js` with automatic reconnect.
    - Fall back to HTTP polling if WS is unavailable.
    - Reuse the same render pipeline as polling (single code path).
 4. **Rate limiting & backpressure**
@@ -134,17 +134,17 @@ Goal: replace high‑rate HTTP polling with a push channel for analysis data.
 ### Sequence Sketch
 
 ```
-rt-ui.js  ->  /ws (subscribe)
+rt-node-ui.js  ->  /ws (subscribe)
 server    ->  get_audio_metrics()
 server    ->  /ws (metrics frame)
-rt-ui.js  ->  render scope/spectrum/probe
+rt-node-ui.js  ->  render scope/spectrum/probe
 ```
 
 ## Deliverables
 
-- Updated `ui/rt-ui.html` with new Probe panel block.
-- Updated `ui/rt-ui.css` with Probe panel styles.
-- Updated `ui/rt-ui.js` to list probe IDs and render probe scope (history buffer).
+- Updated `ui/rt-node-ui.html` with new Probe panel block.
+- Updated `ui/rt-node-ui.css` with Probe panel styles.
+- Updated `ui/rt-node-ui.js` to list probe IDs and render probe scope (history buffer).
 - Optional WS endpoint + client fallback for smooth analysis.
 
 ## Open Questions

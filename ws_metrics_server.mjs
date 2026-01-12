@@ -1,5 +1,5 @@
 /**
- * WebSocket metrics server used by the rt-ui for real-time analysis streaming.
+ * WebSocket metrics server used by the rt-node-ui for real-time analysis streaming.
  *
  * Protocol (JSON messages over WS):
  *

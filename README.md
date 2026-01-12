@@ -62,7 +62,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `get_midi_inputs`, `get_midi_status`, `select_midi_input`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `save_wasm_module`, `load_wasm_module`, `get_midi_inputs`, `get_midi_status`, `select_midi_input`, `stop`.
 - Offline tools: `compile_and_analyze`.
 - DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
@@ -390,7 +390,7 @@ have the `@shren/faust-ui` package installed (in `ui/`), the server will auto-lo
 it. You can also point `FAUST_UI_ROOT` to a custom bundle directory so the page
 can load `/faust-ui/index.js` and use it instead of the fallback UI.
 
-The UI page (`ui/rt-ui.html`) connects to the running DSP over a lightweight
+The UI page (`ui/rt-node-ui.html`) connects to the running DSP over a lightweight
 HTTP JSON API hosted by the Node worker (`faust_node_worker.mjs`) using
 Node's built-in `http` server. This is separate from the MCP transport: MCP
 still runs over SSE/stdio between the Python server and the client, while the UI
@@ -869,7 +869,7 @@ make rt-compile DSP=t1.dsp RT_NAME=fx INPUT_SOURCE=noise
 Real-time compile with a soundfile test input (HTTP URL):
 
 ```bash
-make run-rt-ui
+make run-node-ui
 make rt-compile DSP=t1.dsp RT_NAME=fx INPUT_SOURCE=file INPUT_FILE=http://127.0.0.1:9000/tests/assets/sine.wav
 ```
 
@@ -910,7 +910,7 @@ The helper script `scripts/test_full_api.sh` runs all SSE tools in one go and
 optionally checks the UI HTTP server endpoints.
 
 ```bash
-# Requires the real-time server to be running (see make run-rt-ui).
+# Requires the real-time server to be running (see make run-node-ui).
 scripts/test_full_api.sh
 ```
 
@@ -937,7 +937,7 @@ flags silence/clipping/NaN issues. It also reports probe values when available,
 so you can validate RMS/peak/probe signals across a DSP library.
 
 ```bash
-# Requires the real-time server to be running (see make run-rt-ui).
+# Requires the real-time server to be running (see make run-node-ui).
 scripts/ci_batch_audio.py --glob "*.dsp" --input-source sine --input-freq 1000
 ```
 
@@ -1023,7 +1023,7 @@ python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
 
 ```bash
 make run-rt
-make run-rt-ui
+make run-node-ui
 make run-rt-stdio
 make run-rt-stdio-ui
 make run-rt-stdio-session

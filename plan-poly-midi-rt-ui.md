@@ -1,19 +1,19 @@
-# Detailed Plan - Option A: Poly + MIDI via rt-ui (Node worker)
+# Detailed Plan - Option A: Poly + MIDI via rt-node-ui (Node worker)
 
 ## Positioning (alternative plan)
 
-This document describes **Option A** where the Node worker + rt-ui.html remain in place.
+This document describes **Option A** where the Node worker + rt-node-ui.html remain in place.
 The alternative architecture (**Option B**) is documented separately in:
 plan-mcp-llm-python-pwa.md.
 
 ## 0) Current state (implemented already)
 
-- rt-ui frontend moved into `ui/rt-ui.js` and served by the worker at `/rt-ui.js`.
+- rt-node-ui frontend moved into `ui/rt-node-ui.js` and served by the worker at `/rt-node-ui.js`.
 - Node-side MIDI backend is handled by a git submodule at `external/node-midi`.
   - `make setup-midi` initializes submodule + builds TS (`npm run build:ts`).
   - MIDI devices are listed via `/midi/inputs` and selected via `/midi/select`.
 - `faustwasm` now exposes `setInputParamHandler`; the worker caches input param changes so UI polling shows MIDI-driven updates.
-- rt-ui has a MIDI device selector and status feedback.
+- rt-node-ui has a MIDI device selector and status feedback.
 
 ## 0) Useful references (existing code)
 
@@ -39,7 +39,7 @@ flowchart LR
   Client[MCP client] -->|SSE/stdio| Server[faust_node_server.py]
   Server -->|stdin/stdout JSON| Worker[faust_node_worker.mjs]
   Worker -->|AudioWorklet| WebAudio[node-web-audio-api + faustwasm]
-  UI[rt-ui.html] -->|HTTP JSON| Worker
+  UI[rt-node-ui.html] -->|HTTP JSON| Worker
   UI -->|POST /midi| Worker
 ```
 
@@ -53,8 +53,8 @@ faust_node_server.py (Python)
 faust_node_worker.mjs (Node)
   |  AudioWorklet -> node-web-audio-api + faustwasm
   |
-  +-- HTTP JSON <---- rt-ui.html (browser)
-  +-- POST /midi <--- rt-ui.html (browser)
+  +-- HTTP JSON <---- rt-node-ui.html (browser)
+  +-- POST /midi <--- rt-node-ui.html (browser)
 ```
 
 ### OS processes involved
@@ -62,7 +62,7 @@ faust_node_worker.mjs (Node)
 - MCP client process: MCP tool (LLM client, script, etc.) talking SSE/stdio to the server.
 - Python process: faust_node_server.py exposes MCP API and launches/controls the Node worker.
 - Node.js process: faust_node_worker.mjs runs in a separate Node process, handles WebAudio, faustwasm, and the HTTP UI server.
-- Browser process: rt-ui.html runs in a browser tab, calls the worker over HTTP and sends MIDI to /midi.
+- Browser process: rt-node-ui.html runs in a browser tab, calls the worker over HTTP and sends MIDI to /midi.
   Notes:
 - The UI HTTP server is inside the Node process (not a separate process).
 - Real-time audio output comes from the Node process, not the browser.
@@ -104,7 +104,7 @@ faust_node_worker.mjs (Node)
 6. **Expose status**:
    - Extend `/status` response with `midi_enabled` and `poly_nvoices`.
 7. **UI polish**:
-   - In `ui/rt-ui.js`, show “Poly: N voices” or “Mono”.
+   - In `ui/rt-node-ui.js`, show “Poly: N voices” or “Mono”.
 8. **Manual test**:
    - Compile a DSP with `[nvoices:8]` and confirm `/status` + audio are polyphonic.
 
@@ -154,7 +154,7 @@ Steps:
 
 ## 2) MIDI API on the worker (UiServer route)
 
-Goal: allow rt-ui.html to send MIDI.
+Goal: allow rt-node-ui.html to send MIDI.
 
 1. Node-side MIDI input (current path):
    - MIDI device list: `GET /midi/inputs`.
@@ -179,12 +179,12 @@ Goal: expose poly controls on MCP.
 2. Forward these params to the worker.
 3. Update https://github.com/grame-cncm/faust-mcp/blob/main/README.md to document these options.
 
-## 4) Web MIDI UI in rt-ui.html
+## 4) Web MIDI UI in rt-node-ui.html
 
 Goal: a simple, robust MIDI interface.
 
 1. UI:
-   - MIDI input selector is in `ui/rt-ui.js` and polls `/midi/inputs`.
+   - MIDI input selector is in `ui/rt-node-ui.js` and polls `/midi/inputs`.
    - Show only if midi_enabled is true (via `/status`).
 2. Optional Web MIDI (if POST /midi is kept):
    - navigator.requestMIDIAccess() + access.onstatechange to list devices.

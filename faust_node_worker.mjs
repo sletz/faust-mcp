@@ -415,6 +415,8 @@ class WorkerRuntime {
     this.outputParamsCache = {};
     this.meterUnitsByPath = {};
     this.meterProbesByPath = {};
+    this.wasmFactory = null;
+    this.wasmEffectFactory = null;
     this.polyNvoices = 0;
     this.midiEnabled = false;
     this.dspName = null;
@@ -483,6 +485,8 @@ class WorkerRuntime {
     this.meterProbesByPath = {};
     this.faustJson = null;
     this.dspName = null;
+    this.wasmFactory = null;
+    this.wasmEffectFactory = null;
     this.polyNvoices = 0;
     this.midiEnabled = false;
 
@@ -533,12 +537,16 @@ class WorkerRuntime {
           stage: 'poly',
         });
       }
+      this.wasmFactory = polyGenerator.voiceFactory || null;
+      this.wasmEffectFactory = polyGenerator.effectFactory || null;
       this.faustNode = await polyGenerator.createNode(
         this.audioContext,
         this.polyNvoices,
         name,
       );
     } else {
+      this.wasmFactory = monoGenerator.factory || null;
+      this.wasmEffectFactory = null;
       this.faustNode = await monoGenerator.createNode(this.audioContext);
     }
 
@@ -691,6 +699,206 @@ class WorkerRuntime {
   }
 
   /**
+   * Return the compiled WebAssembly module for the current DSP (base64).
+   * @returns {object}
+   */
+  saveWasmModule() {
+    if (!this.wasmFactory) {
+      throw new ToolError(
+        'no_dsp',
+        'No compiled DSP. Call compile or compile_and_start first.',
+      );
+    }
+    const wasmCode = this.wasmFactory.code;
+    if (!wasmCode) {
+      throw new ToolError('wasm_unavailable', 'WASM module is not available.');
+    }
+    let dspJson = this.faustJson || null;
+    if (this.wasmFactory?.json) {
+      try {
+        dspJson = JSON.parse(this.wasmFactory.json);
+      } catch (_) {
+        dspJson = this.faustJson || null;
+      }
+    }
+    const payload = {
+      status: 'ok',
+      poly: this.polyNvoices > 0,
+      sha_key: this.wasmFactory.shaKey || null,
+      wasm_base64: Buffer.from(wasmCode).toString('base64'),
+      bytes: wasmCode.length,
+      dsp_json: dspJson,
+    };
+    if (this.wasmEffectFactory?.code) {
+      let effectJson = this.wasmEffectFactory?.json ?? this.faustJson?.effect ?? null;
+      if (typeof effectJson === 'string') {
+        try {
+          effectJson = JSON.parse(effectJson);
+        } catch (_) {}
+      }
+      payload.effect_sha_key = this.wasmEffectFactory.shaKey || null;
+      payload.effect_wasm_base64 = Buffer.from(this.wasmEffectFactory.code).toString('base64');
+      payload.effect_bytes = this.wasmEffectFactory.code.length;
+      payload.effect_dsp_json = effectJson;
+    }
+    return this.withSchema(payload);
+  }
+
+  /**
+   * Load a pre-compiled WebAssembly module and create the DSP node.
+   * @param {object} params
+   * @returns {Promise<object>}
+   */
+  async loadWasmModule({
+    wasm_base64,
+    dsp_json,
+    effect_wasm_base64,
+    effect_dsp_json,
+    name,
+    latency_hint,
+  }) {
+    await this.compilerManager.ensureReady();
+    if (!wasm_base64) {
+      throw new ToolError('invalid_params', 'Missing wasm_base64');
+    }
+    if (!dsp_json) {
+      throw new ToolError('invalid_params', 'Missing dsp_json');
+    }
+
+    if (this.audioContext) {
+      await this.stop();
+    }
+    this.started = false;
+    this.paramsCache = [];
+    this.meterUnitsByPath = {};
+    this.meterProbesByPath = {};
+    this.faustJson = null;
+    this.dspName = null;
+    this.wasmFactory = null;
+    this.wasmEffectFactory = null;
+    this.polyNvoices = 0;
+    this.midiEnabled = false;
+
+    const parsedJson = typeof dsp_json === 'string' ? JSON.parse(dsp_json) : dsp_json;
+    const jsonStr = typeof dsp_json === 'string' ? dsp_json : JSON.stringify(dsp_json);
+    const { midiEnabled, nvoices } = extractMidiAndNvoices(parsedJson?.meta);
+    this.midiEnabled = midiEnabled;
+    this.polyNvoices = nvoices > 0 ? nvoices : 0;
+
+    const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
+    const AudioContext = this.compilerManager.AudioContext;
+    this.audioContext = new AudioContext({ latencyHint: hint });
+
+    const wasmBytes = Buffer.from(wasm_base64, 'base64');
+    const wasmModule = await WebAssembly.compile(wasmBytes);
+    const wasmFactory = {
+      cfactory: 0,
+      code: new Uint8Array(wasmBytes),
+      module: wasmModule,
+      json: jsonStr,
+      poly: this.polyNvoices > 0,
+    };
+
+    let effectFactory = null;
+    if (effect_wasm_base64 && effect_dsp_json) {
+      const effectJsonStr = typeof effect_dsp_json === 'string'
+        ? effect_dsp_json
+        : JSON.stringify(effect_dsp_json);
+      const effectBytes = Buffer.from(effect_wasm_base64, 'base64');
+      const effectModule = await WebAssembly.compile(effectBytes);
+      effectFactory = {
+        cfactory: 0,
+        code: new Uint8Array(effectBytes),
+        module: effectModule,
+        json: effectJsonStr,
+        poly: true,
+      };
+    }
+
+    if (this.polyNvoices > 0) {
+      const polyGenerator = this.compilerManager.createPolyGenerator();
+      const isDouble = parsedJson?.compile_options?.includes('-double');
+      const { mixerModule } = await this.compilerManager.compiler.getAsyncInternalMixerModule(
+        !!isDouble,
+      );
+      this.faustNode = await polyGenerator.createNode(
+        this.audioContext,
+        this.polyNvoices,
+        name || parsedJson?.name || 'faust-rt',
+        wasmFactory,
+        mixerModule,
+        effectFactory || undefined,
+      );
+    } else {
+      const monoGenerator = this.compilerManager.createGenerator();
+      this.faustNode = await monoGenerator.createNode(
+        this.audioContext,
+        name || parsedJson?.name || 'faust-rt',
+        wasmFactory,
+      );
+    }
+
+    if (!this.faustNode) {
+      throw new ToolError('node_create_failed', 'Failed to create Faust node');
+    }
+
+    this.wasmFactory = wasmFactory;
+    this.wasmEffectFactory = effectFactory;
+
+    this.outputParamsCache = {};
+    this.inputParamsCache = {};
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
+    });
+    if (typeof this.faustNode.setOutputParamHandler === 'function') {
+      this.faustNode.setOutputParamHandler((path, value) => {
+        this.outputParamsCache[path] = value;
+      });
+    }
+    if (typeof this.faustNode.setInputParamHandler === 'function') {
+      this.faustNode.setInputParamHandler((path, value) => {
+        this.inputParamsCache[path] = value;
+      });
+    }
+
+    try {
+      this.faustNode.start();
+    } catch (_) {}
+
+    let resolvedJson = parsedJson;
+    try {
+      const runtimeJson = this.faustNode.getJSON();
+      if (runtimeJson) {
+        resolvedJson = JSON.parse(runtimeJson);
+      }
+    } catch (_) {}
+    this.faustJson = resolvedJson;
+    this.dspName = this.faustJson?.name || name || null;
+    this.paramsCache = extractParamsFromJson(this.faustJson);
+    this.meterUnitsByPath = extractBargraphUnits(this.faustJson);
+    this.meterProbesByPath = extractBargraphProbes(this.faustJson);
+    this.metricsCollector.setMeterCaches({
+      outputParamsCache: this.outputParamsCache,
+      meterUnitsByPath: this.meterUnitsByPath,
+      meterProbesByPath: this.meterProbesByPath,
+    });
+    this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
+
+    return this.withSchema({
+      status: 'compiled',
+      name: this.dspName,
+      latency_hint: hint,
+      inputs: this.faustJson?.inputs ?? null,
+      outputs: this.faustJson?.outputs ?? null,
+      params: this.paramsCache,
+      param_paths: this.getParamPaths(),
+      faust_json: this.faustJson,
+    });
+  }
+
+  /**
    * Set a parameter value on the running DSP.
    * @param {{path: string, value: number}} params
    * @returns {object}
@@ -802,7 +1010,7 @@ class WorkerRuntime {
 }
 
 /**
- * Simple HTTP server for the rt-ui HTML + Faust UI assets.
+ * Simple HTTP server for the rt-node-ui HTML + Faust UI assets.
  */
 class UiServer {
   /**
@@ -842,7 +1050,7 @@ class UiServer {
    */
   start() {
     if (!this.uiPort || this.server) return;
-    const uiHtmlPath = path.join(this.mcpRoot, 'ui', 'rt-ui.html');
+    const uiHtmlPath = path.join(this.mcpRoot, 'ui', 'rt-node-ui.html');
     this.resolvedUiRoot = this.resolveUiRoot();
 
     this.server = http.createServer((req, res) => {
@@ -854,8 +1062,8 @@ class UiServer {
         return;
       }
 
-      if (url.pathname === '/rt-ui.js') {
-        const filePath = path.join(this.mcpRoot, 'ui', 'rt-ui.js');
+      if (url.pathname === '/rt-node-ui.js') {
+        const filePath = path.join(this.mcpRoot, 'ui', 'rt-node-ui.js');
         if (fs.existsSync(filePath)) {
           res.writeHead(200, { 'Content-Type': 'application/javascript' });
           res.end(fs.readFileSync(filePath));
@@ -866,8 +1074,8 @@ class UiServer {
         return;
       }
 
-      if (url.pathname === '/rt-ui.css') {
-        const filePath = path.join(this.mcpRoot, 'ui', 'rt-ui.css');
+      if (url.pathname === '/rt-node-ui.css') {
+        const filePath = path.join(this.mcpRoot, 'ui', 'rt-node-ui.css');
         if (fs.existsSync(filePath)) {
           res.writeHead(200, { 'Content-Type': 'text/css' });
           res.end(fs.readFileSync(filePath));
@@ -1396,6 +1604,8 @@ class WorkerApp {
       get_dsp_json: () => this.runtime.getDspJson(),
       get_param_values: () => this.runtime.getParamValues(),
       get_audio_metrics: (params) => this.runtime.getAudioMetrics(params || {}),
+      load_wasm_module: (params) => this.runtime.loadWasmModule(params || {}),
+      save_wasm_module: () => this.runtime.saveWasmModule(),
       get_status: () => ({
         schema_version: MCP_SCHEMA_VERSION,
         running: !!this.runtime.faustNode,

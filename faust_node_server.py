@@ -8,6 +8,7 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 Tools:
   - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
   - compile(faust_code, name?, input_source?, input_freq?, input_file?, hide_meters?)
+  - load_wasm_module(wasm_base64, dsp_json, effect_wasm_base64?, effect_dsp_json?, name?, latency_hint?)
   - start()
   - check_syntax(faust_code, name?)
   - get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)
@@ -15,6 +16,7 @@ Tools:
   - get_midi_inputs()
   - get_midi_status()
   - get_dsp_json()
+  - save_wasm_module()
   - get_params()
   - get_param(path)
   - get_param_values()
@@ -213,6 +215,31 @@ def compile(
 
 
 @mcp.tool()
+def load_wasm_module(
+    wasm_base64: str,
+    dsp_json: dict | str,
+    effect_wasm_base64: str | None = None,
+    effect_dsp_json: dict | str | None = None,
+    name: str | None = None,
+    latency_hint: str = "interactive",
+) -> str:
+    """Load a pre-compiled WebAssembly module (base64) for the running DSP."""
+
+    result = worker.request(
+        "load_wasm_module",
+        {
+            "wasm_base64": wasm_base64,
+            "dsp_json": dsp_json,
+            "effect_wasm_base64": effect_wasm_base64,
+            "effect_dsp_json": effect_dsp_json,
+            "name": name,
+            "latency_hint": latency_hint,
+        },
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 def start() -> str:
     """Start audio rendering for the compiled DSP."""
 
@@ -293,6 +320,14 @@ def get_dsp_json() -> str:
     """Return the full Faust JSON for the running DSP."""
 
     result = worker.request("get_dsp_json")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def save_wasm_module() -> str:
+    """Return the compiled WebAssembly module for the running DSP (base64)."""
+
+    result = worker.request("save_wasm_module")
     return json.dumps(result, indent=2)
 
 
