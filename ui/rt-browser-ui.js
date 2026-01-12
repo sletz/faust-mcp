@@ -82,6 +82,10 @@ class RtBrowserUiApp {
     };
   }
 
+  /**
+   * Update the header status text.
+   * @param {string} message
+   */
   setStatus(message) {
     if (!this.dom.status) return;
     this.dom.status.textContent = message;
@@ -574,6 +578,10 @@ class RtBrowserUiApp {
     } catch (_) {}
   }
 
+  /**
+   * Refresh UI state after loading or compiling a DSP.
+   * @param {{faustJson?: object}} [options]
+   */
   async refreshUiAfterLoad({ faustJson } = {}) {
     let resolvedJson = faustJson;
     if (!resolvedJson) {
@@ -770,6 +778,9 @@ class RtBrowserUiApp {
     return mounted;
   }
 
+  /**
+   * Load DSP code from query parameters (if provided).
+   */
   async loadDspFromQuery() {
     if (!this.loader.textarea) return;
     const params = new URLSearchParams(window.location.search);

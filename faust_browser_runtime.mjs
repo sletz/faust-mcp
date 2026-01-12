@@ -115,6 +115,9 @@ function base64ToBytes(base64) {
  * Loader for Faust WASM + compiler classes in the browser.
  */
 class FaustBrowserCompilerManager {
+  /**
+   * @param {object} options
+   */
   constructor(options) {
     this.options = options;
     this.compiler = null;
@@ -124,6 +127,10 @@ class FaustBrowserCompilerManager {
     this.FaustSvgDiagrams = null;
   }
 
+  /**
+   * Lazy-load compiler and wasm bindings.
+   * @returns {Promise<object>}
+   */
   async ensureReady() {
     if (this.compiler) return this.compiler;
     const moduleUrl = toAbsoluteUrl(this.options.faustModuleUrl);
@@ -227,6 +234,9 @@ class FaustBrowserCompilerManager {
  * Collect metering + analyser payloads.
  */
 class MetricsCollector {
+  /**
+   * Initialize analyser state and caches.
+   */
   constructor() {
     this.audioContext = null;
     this.faustNode = null;
@@ -424,6 +434,9 @@ class MetricsCollector {
  * Browser MIDI manager using Web MIDI API.
  */
 class MidiManager {
+  /**
+   * @param {object} runtime
+   */
   constructor(runtime) {
     this.runtime = runtime;
     this.midiAccess = null;
@@ -763,6 +776,10 @@ export function createBrowserRuntime(options = {}) {
     return compiled;
   }
 
+  /**
+   * Reset and stop the current graph before rebuilding.
+   * @returns {Promise<void>}
+   */
   async function prepareForNewGraph() {
     if (state.audio_context) {
       await stop();
@@ -771,6 +788,11 @@ export function createBrowserRuntime(options = {}) {
     }
   }
 
+  /**
+   * Initialize the AudioContext for the runtime.
+   * @param {string} latency_hint
+   * @returns {string}
+   */
   function initAudioContext(latency_hint) {
     const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
     const AudioContextClass = getAudioContextClass();
@@ -781,6 +803,11 @@ export function createBrowserRuntime(options = {}) {
     return hint;
   }
 
+  /**
+   * Create a Faust node for mono or poly graphs.
+   * @param {object} params
+   * @returns {Promise<object>}
+   */
   async function createFaustNode({ wasmFactory, effectFactory, parsedJson, name }) {
     if (state.poly_nvoices > 0) {
       const polyGenerator = compilerManager.createPolyGenerator();
@@ -805,6 +832,9 @@ export function createBrowserRuntime(options = {}) {
     );
   }
 
+  /**
+   * Attach input/output param handlers to the Faust node.
+   */
   function attachParamHandlers() {
     state.output_params_cache = {};
     state.input_params_cache = {};
@@ -827,6 +857,9 @@ export function createBrowserRuntime(options = {}) {
     }
   }
 
+  /**
+   * Start the Faust node if supported.
+   */
   function tryStartNode() {
     if (typeof state.faust_node.start === 'function') {
       try {
@@ -835,6 +868,11 @@ export function createBrowserRuntime(options = {}) {
     }
   }
 
+  /**
+   * Read Faust JSON from the node and handle fallbacks.
+   * @param {object} params
+   * @returns {object}
+   */
   function resolveRuntimeJson({ fallback, allowFallback }) {
     try {
       const runtimeJson = state.faust_node.getJSON();
@@ -852,6 +890,11 @@ export function createBrowserRuntime(options = {}) {
     return fallback;
   }
 
+  /**
+   * Populate caches and return a compiled response payload.
+   * @param {object} params
+   * @returns {object}
+   */
   function finalizeRuntimeState({ hint, name, fallbackJson, allowFallback }) {
     const resolvedJson = resolveRuntimeJson({ fallback: fallbackJson, allowFallback });
     state.dsp_json = resolvedJson;
@@ -871,6 +914,11 @@ export function createBrowserRuntime(options = {}) {
     return buildRuntimeResponse({ hint, name });
   }
 
+  /**
+   * Build the standard compiled response payload.
+   * @param {object} params
+   * @returns {object}
+   */
   function buildRuntimeResponse({ hint, name }) {
     return withSchema({
       status: 'compiled',

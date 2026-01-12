@@ -6,6 +6,10 @@ import { wrapTestInputs } from '../faust_dsp_utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Build the CLI usage text.
+ * @returns {string}
+ */
 function usage() {
   return [
     'Usage: node scripts/emit_wrapped_dsp.mjs --dsp <file> [options]',
@@ -19,6 +23,11 @@ function usage() {
   ].join('\n');
 }
 
+/**
+ * Parse CLI arguments into options.
+ * @param {string[]} argv
+ * @returns {object}
+ */
 function parseArgs(argv) {
   // Minimal CLI parsing to keep the script dependency-free.
   const args = {
@@ -77,6 +86,10 @@ function parseArgs(argv) {
   return args;
 }
 
+/**
+ * Run the wrapper and emit the resulting DSP.
+ * @returns {Promise<void>}
+ */
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.dsp) {

@@ -1,4 +1,7 @@
 // rt-node-ui client: renders Faust UI, keeps params/meters in sync, and manages MIDI/scopes/probes.
+/**
+ * Node runtime UI controller for Faust RT.
+ */
 class RtUiApp {
   /**
    * @param {object} [options]
@@ -70,7 +73,11 @@ class RtUiApp {
     this.lastSpectrumFetch = 0;
   }
 
-  // Format the DSP name with mono/poly context when available.
+  /**
+   * Format the DSP name for the header.
+   * @param {object} statusJson
+   * @returns {string}
+   */
   formatDspLabel(statusJson) {
     const name = statusJson?.name;
     if (!name) return 'DSP: (none)';
@@ -80,7 +87,10 @@ class RtUiApp {
     return `DSP: ${name} (Mono)`;
   }
 
-  // Update the active voice count display (polyphonic DSPs only).
+  /**
+   * Update the active voice count display.
+   * @param {object} statusJson
+   */
   updatePolyActivity(statusJson) {
     const display = this.dom.polyActive;
     if (!display) return;
@@ -96,14 +106,21 @@ class RtUiApp {
     }
   }
 
-  // Fetch JSON from the UI server and raise on HTTP errors.
+  /**
+   * Fetch JSON from the UI server.
+   * @param {string} path
+   * @returns {Promise<any>}
+   */
   async fetchJson(path) {
     const res = await fetch(path);
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return res.json();
   }
 
-  // Apply compact mode and persist it in localStorage.
+  /**
+   * Apply compact mode and persist it.
+   * @param {boolean} enabled
+   */
   setCompactMode(enabled) {
     const root = this.dom.appShell;
     if (!root) return;
@@ -118,7 +135,10 @@ class RtUiApp {
     this.updateFaustUiScale();
   }
 
-  // Show/hide the analysis column and persist in localStorage.
+  /**
+   * Show or hide the analysis column.
+   * @param {boolean} visible
+   */
   setAnalysisVisibility(visible) {
     const root = this.dom.appShell;
     if (!root) return;
@@ -133,7 +153,9 @@ class RtUiApp {
     } catch (_) {}
   }
 
-  // Restore compact mode from localStorage on load.
+  /**
+   * Restore compact mode from localStorage.
+   */
   restoreCompactMode() {
     try {
       const value = localStorage.getItem('rt-node-ui-compact');
@@ -143,7 +165,9 @@ class RtUiApp {
     }
   }
 
-  // Restore analysis column visibility from localStorage on load.
+  /**
+   * Restore analysis column visibility from localStorage.
+   */
   restoreAnalysisVisibility() {
     try {
       const value = localStorage.getItem('rt-node-ui-analysis-hidden');
@@ -153,7 +177,9 @@ class RtUiApp {
     }
   }
 
-  // Restore the stored left column width, if any.
+  /**
+   * Restore the stored left column width, if any.
+   */
   restoreColumnWidth() {
     const root = this.dom.appShell;
     if (!root) return;
@@ -166,7 +192,10 @@ class RtUiApp {
     } catch (_) {}
   }
 
-  // Apply a left column width in pixels.
+  /**
+   * Apply a left column width in pixels.
+   * @param {number} width
+   */
   setLeftColumnWidth(width) {
     const root = this.dom.appShell;
     if (!root) return;
@@ -177,7 +206,10 @@ class RtUiApp {
     }
   }
 
-  // Get the splitter width from CSS.
+  /**
+   * Get the splitter width from CSS.
+   * @returns {number}
+   */
   getSplitterWidth() {
     if (!this.dom.appMain) return 16;
     const value = getComputedStyle(this.dom.appMain).getPropertyValue('--splitter-width');
@@ -185,7 +217,9 @@ class RtUiApp {
     return Number.isFinite(parsed) ? parsed : 16;
   }
 
-  // Bind pointer events for the column splitter.
+  /**
+   * Bind pointer events for the column splitter.
+   */
   bindColumnSplitter() {
     const splitter = this.dom.columnSplitter;
     if (!splitter || !this.dom.appMain || !this.dom.appShell) return;
@@ -224,7 +258,12 @@ class RtUiApp {
     });
   }
 
-  // Send a parameter update to the UI server.
+  /**
+   * Send a parameter update to the UI server.
+   * @param {string} path
+   * @param {number} value
+   * @returns {Promise<void>}
+   */
   async setParam(path, value) {
     await fetch('/param', {
       method: 'POST',
@@ -233,7 +272,9 @@ class RtUiApp {
     });
   }
 
-  // Scale the Faust UI to fit within the container.
+  /**
+   * Scale the Faust UI to fit within the container.
+   */
   updateFaustUiScale() {
     if (!this.faustUiLayout || !this.dom.faustContainer || !this.dom.faustRoot) return;
     const { minWidth, minHeight } = this.faustUiLayout;
@@ -244,7 +285,10 @@ class RtUiApp {
     this.dom.faustRoot.style.transformOrigin = 'center center';
   }
 
-  // Render a basic slider UI when the Faust UI bundle is unavailable.
+  /**
+   * Render fallback sliders when Faust UI is unavailable.
+   * @param {Array<object>} params
+   */
   renderFallback(params) {
     const container = this.dom.fallback;
     container.innerHTML = '';
@@ -273,14 +317,19 @@ class RtUiApp {
     });
   }
 
-  // Fetch current parameter values from the UI server.
+  /**
+   * Fetch current parameter values from the UI server.
+   * @returns {Promise<object|null>}
+   */
   async fetchParamValues() {
     const res = await fetch('/param-values');
     if (!res.ok) return null;
     return res.json();
   }
 
-  // Refresh UI controls with the latest parameter values.
+  /**
+   * Refresh UI controls with the latest parameter values.
+   */
   async refreshParamValues() {
     try {
       const values = await this.fetchParamValues();
@@ -290,7 +339,10 @@ class RtUiApp {
     }
   }
 
-  // Apply parameter values to the Faust UI or fallback controls.
+  /**
+   * Apply parameter values to the Faust UI or fallback controls.
+   * @param {Array<{path: string, value: number}>} values
+   */
   applyParamValues(values) {
     if (!values || !Array.isArray(values)) return;
     values.forEach((entry) => {
@@ -308,14 +360,21 @@ class RtUiApp {
     });
   }
 
-  // Fetch available MIDI inputs from the UI server.
+  /**
+   * Fetch available MIDI inputs from the UI server.
+   * @returns {Promise<object|null>}
+   */
   async fetchMidiInputs() {
     const res = await fetch('/midi/inputs');
     if (!res.ok) return null;
     return res.json();
   }
 
-  // Fetch scope/spectrum/probe data from the UI server.
+  /**
+   * Fetch scope/spectrum/probe data from the UI server.
+   * @param {object} params
+   * @returns {Promise<object|null>}
+   */
   async fetchAudioMetrics(params) {
     const query = new URLSearchParams();
     Object.entries(params || {}).forEach(([key, value]) => {
@@ -327,13 +386,19 @@ class RtUiApp {
     return res.json();
   }
 
-  // Build a WebSocket URL for metrics streaming.
+  /**
+   * Build the WebSocket URL for metrics streaming.
+   * @returns {string}
+   */
   buildWsUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/ws`;
   }
 
-  // Build the current subscription payload for WebSocket streaming.
+  /**
+   * Build the WebSocket subscription payload.
+   * @returns {object}
+   */
   buildWsConfig() {
     const includeScope = this.scopeMode === 'scope' || this.scopeMode === 'both';
     const includeSpectrum = this.scopeMode === 'spectrum' || this.scopeMode === 'both';
@@ -365,7 +430,9 @@ class RtUiApp {
     return payload;
   }
 
-  // Start a WebSocket stream for analysis data.
+  /**
+   * Start a WebSocket stream for analysis data.
+   */
   startWebSocket() {
     if (typeof WebSocket === 'undefined') return;
     const url = this.buildWsUrl();
@@ -401,7 +468,9 @@ class RtUiApp {
     });
   }
 
-  // Retry WebSocket connection after a delay.
+  /**
+   * Retry WebSocket connection after a delay.
+   */
   scheduleWsReconnect() {
     if (this.wsRetryTimer) return;
     this.wsRetryTimer = window.setTimeout(() => {
@@ -410,7 +479,9 @@ class RtUiApp {
     }, this.wsRetryMs);
   }
 
-  // Send the current subscription to the WebSocket.
+  /**
+   * Send the current subscription to the WebSocket.
+   */
   sendWsSubscribe() {
     if (!this.wsConnected || !this.ws) return;
     try {
@@ -418,7 +489,11 @@ class RtUiApp {
     } catch (_) {}
   }
 
-  // Update probe history and scope/spectrum from a metrics payload.
+  /**
+   * Update probe history and scope/spectrum from a metrics payload.
+   * @param {object} metrics
+   * @param {object} options
+   */
   applyMetricsPayload(metrics, { includeScope, includeSpectrum } = {}) {
     if (!metrics) return;
     if (metrics.probes) {
@@ -474,7 +549,10 @@ class RtUiApp {
     }
   }
 
-  // Append the selected probe value from a metrics payload.
+  /**
+   * Append the selected probe value from a metrics payload.
+   * @param {object} metrics
+   */
   updateProbeSeriesFromMetrics(metrics) {
     const selected = this.dom.probeSelect?.value;
     if (!selected || !metrics?.probes) return;
@@ -492,7 +570,10 @@ class RtUiApp {
     this.renderProbeScope();
   }
 
-  // Update probe selector from get_audio_metrics().probes.
+  /**
+   * Update probe selector from get_audio_metrics().probes.
+   * @param {Array<{id: number}>} probes
+   */
   updateProbeOptions(probes) {
     const select = this.dom.probeSelect;
     if (!select) return;
@@ -537,7 +618,9 @@ class RtUiApp {
     }
   }
 
-  // Draw a probe scope from the rolling history buffer.
+  /**
+   * Draw a probe scope from the rolling history buffer.
+   */
   renderProbeScope() {
     const canvas = this.dom.probeCanvas;
     if (!canvas) return;
@@ -571,7 +654,10 @@ class RtUiApp {
     ctx.stroke();
   }
 
-  // Update available channel options based on analyser payload.
+  /**
+   * Update available channel options based on analyser payload.
+   * @param {number} channelCount
+   */
   updateScopeChannelOptions(channelCount) {
     const select = this.dom.scopeChannel;
     if (!select || !Number.isFinite(channelCount)) return;
@@ -604,7 +690,10 @@ class RtUiApp {
     }
   }
 
-  // Update channel options based on Faust JSON output count.
+  /**
+   * Update channel options based on Faust JSON output count.
+   * @param {object} faustJson
+   */
   updateScopeChannelsFromJson(faustJson) {
     const outputs = Number(faustJson?.outputs);
     if (!Number.isFinite(outputs) || outputs <= 0) return;
@@ -613,7 +702,11 @@ class RtUiApp {
     }
   }
 
-  // Update the MIDI status text and styling.
+  /**
+   * Update the MIDI status text and styling.
+   * @param {string} state
+   * @param {string} text
+   */
   setMidiStatus(state, text) {
     const status = this.dom.midiStatus;
     if (!status) return;
@@ -624,7 +717,11 @@ class RtUiApp {
     }
   }
 
-  // Request the UI server to select a MIDI input by index or name.
+  /**
+   * Request the UI server to select a MIDI input by index or name.
+   * @param {object} payload
+   * @returns {Promise<object>}
+   */
   async selectMidiInput(payload) {
     const res = await fetch('/midi/select', {
       method: 'POST',
@@ -635,7 +732,9 @@ class RtUiApp {
     return res.json();
   }
 
-  // Refresh MIDI device list and selection state.
+  /**
+   * Refresh MIDI device list and selection state.
+   */
   async refreshMidiInputs() {
     const select = this.dom.midiSelect;
     try {
@@ -680,7 +779,9 @@ class RtUiApp {
     }
   }
 
-  // Bind UI selection changes to the MIDI selection endpoint.
+  /**
+   * Bind UI selection changes to the MIDI selection endpoint.
+   */
   setupMidiSelect() {
     const select = this.dom.midiSelect;
     select.addEventListener('change', async () => {
@@ -704,7 +805,10 @@ class RtUiApp {
     });
   }
 
-  // Resize a canvas to match its displayed size.
+  /**
+   * Resize a canvas to match its displayed size.
+   * @param {HTMLCanvasElement} canvas
+   */
   resizeCanvas(canvas) {
     if (!canvas) return;
     const rect = canvas.parentElement
@@ -719,7 +823,10 @@ class RtUiApp {
     }
   }
 
-  // Draw time-domain scope samples.
+  /**
+   * Draw time-domain scope samples.
+   * @param {object} scopePayload
+   */
   renderScope(scopePayload) {
     const canvas = this.dom.scopeCanvas;
     if (!canvas || !scopePayload?.samples?.length) return;
@@ -753,7 +860,10 @@ class RtUiApp {
     ctx.stroke();
   }
 
-  // Draw spectrum bins (dB) as vertical bars.
+  /**
+   * Draw spectrum bins (dB) as vertical bars.
+   * @param {object} spectrumPayload
+   */
   renderSpectrum(spectrumPayload) {
     const canvas = this.dom.spectrumCanvas;
     if (!canvas || !spectrumPayload) return;
@@ -795,7 +905,9 @@ class RtUiApp {
     }
   }
 
-  // Update scope/spectrum UI based on the selected mode.
+  /**
+   * Update scope/spectrum UI based on the selected mode.
+   */
   async refreshScopeData() {
     if (this.wsConnected) return;
     const includeScope = this.scopeMode === 'scope' || this.scopeMode === 'both';
@@ -826,7 +938,9 @@ class RtUiApp {
     });
   }
 
-  // Handle scope/spectrum tab selection.
+  /**
+   * Handle scope/spectrum tab selection.
+   */
   setupScopeTabs() {
     const tabs = this.dom.scopeTabs || [];
     tabs.forEach((tab) => {
@@ -861,7 +975,9 @@ class RtUiApp {
     });
   }
 
-  // Bind channel selector to scope/spectrum rendering.
+  /**
+   * Bind channel selector to scope/spectrum rendering.
+   */
   setupScopeChannel() {
     const select = this.dom.scopeChannel;
     if (!select) return;
@@ -875,7 +991,9 @@ class RtUiApp {
     });
   }
 
-  // Bind probe selector to the probe scope history buffer.
+  /**
+   * Bind probe selector to the probe scope history buffer.
+   */
   setupProbeSelect() {
     const select = this.dom.probeSelect;
     if (!select) return;
@@ -891,7 +1009,9 @@ class RtUiApp {
     });
   }
 
-  // Poll probe values and update the rolling scope (low rate to avoid UI churn).
+  /**
+   * Poll probe values and update the rolling scope.
+   */
   async refreshProbeData() {
     if (this.wsConnected) return;
     const selected = this.dom.probeSelect?.value;
@@ -902,7 +1022,11 @@ class RtUiApp {
     this.updateProbeSeriesFromMetrics(metrics);
   }
 
-  // Create and mount the Faust UI bundle if available.
+  /**
+   * Create and mount the Faust UI bundle if available.
+   * @param {object} faustJson
+   * @returns {Promise<boolean>}
+   */
   async tryFaustUI(faustJson) {
     try {
       const module = await import('/faust-ui/index.js');
@@ -938,7 +1062,10 @@ class RtUiApp {
     }
   }
 
-  // Render the UI once and return a JSON signature used for change detection.
+  /**
+   * Render the UI once and return a JSON signature used for change detection.
+   * @returns {Promise<string|null>}
+   */
   async renderOnce() {
     try {
       const statusJson = await this.fetchJson('/status');
@@ -960,7 +1087,9 @@ class RtUiApp {
     }
   }
 
-  // Start polling loops for DSP changes, param values, and MIDI devices.
+  /**
+   * Start polling loops for DSP changes, params, and MIDI devices.
+   */
   startPolling() {
     setInterval(async () => {
       try {
@@ -993,7 +1122,9 @@ class RtUiApp {
     setInterval(() => this.refreshProbeData(), this.probePollMs);
   }
 
-  // Bootstrap UI, polling loops, and MIDI selector.
+  /**
+   * Bootstrap UI, polling loops, and MIDI selector.
+   */
   async start() {
     if (this.dom.compactToggle) {
       this.dom.compactToggle.addEventListener('click', () => {

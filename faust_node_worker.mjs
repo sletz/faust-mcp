@@ -460,6 +460,10 @@ class WorkerRuntime {
     return this.faustNode.getParams?.() ?? this.paramsCache.map((p) => p.path);
   }
 
+  /**
+   * Reset and stop the current graph before rebuilding.
+   * @returns {Promise<void>}
+   */
   async prepareForNewGraph() {
     if (this.audioContext) {
       await this.stop();
@@ -468,6 +472,11 @@ class WorkerRuntime {
     }
   }
 
+  /**
+   * Initialize the AudioContext for the runtime.
+   * @param {string} latency_hint
+   * @returns {string}
+   */
   initAudioContext(latency_hint) {
     const hint = latency_hint === 'playback' ? 'playback' : 'interactive';
     const AudioContext = this.compilerManager.AudioContext;
@@ -475,6 +484,11 @@ class WorkerRuntime {
     return hint;
   }
 
+  /**
+   * Create a Faust node for mono or poly graphs.
+   * @param {object} params
+   * @returns {Promise<object>}
+   */
   async createFaustNode({ wasmFactory, effectFactory, parsedJson, name }) {
     if (this.polyNvoices > 0) {
       const polyGenerator = this.compilerManager.createPolyGenerator();
@@ -499,6 +513,9 @@ class WorkerRuntime {
     );
   }
 
+  /**
+   * Attach input/output param handlers to the Faust node.
+   */
   attachParamHandlers() {
     this.outputParamsCache = {};
     this.inputParamsCache = {};
@@ -519,12 +536,20 @@ class WorkerRuntime {
     }
   }
 
+  /**
+   * Start the Faust node if supported.
+   */
   tryStartNode() {
     try {
       this.faustNode.start();
     } catch (_) {}
   }
 
+  /**
+   * Read Faust JSON from the node and handle fallbacks.
+   * @param {object} params
+   * @returns {object}
+   */
   resolveRuntimeJson({ fallback, allowFallback }) {
     try {
       const runtimeJson = this.faustNode.getJSON();
@@ -542,6 +567,11 @@ class WorkerRuntime {
     return fallback;
   }
 
+  /**
+   * Populate caches and return a compiled response payload.
+   * @param {object} params
+   * @returns {object}
+   */
   finalizeRuntimeState({ hint, name, fallbackJson, allowFallback }) {
     const resolvedJson = this.resolveRuntimeJson({ fallback: fallbackJson, allowFallback });
     this.faustJson = resolvedJson;
@@ -559,6 +589,11 @@ class WorkerRuntime {
     return this.buildRuntimeResponse({ hint, name });
   }
 
+  /**
+   * Build the standard compiled response payload.
+   * @param {object} params
+   * @returns {object}
+   */
   buildRuntimeResponse({ hint, name }) {
     return this.withSchema({
       status: 'compiled',

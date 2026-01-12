@@ -9,7 +9,7 @@
  * @param {number|undefined|null} inputFreq
  * @param {string|undefined|null} inputFile
  * @param {boolean} hideMeters
- * @returns {string}
+ * @returns {{code: string, useExternalInput: boolean, inputFile?: string}}
  */
 export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideMeters) {
   const source = (inputSource || 'none').trim().toLowerCase();
