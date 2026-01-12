@@ -28,7 +28,7 @@ plan-mcp-llm-python-pwa.md.
     - startMIDI()/stopMIDI() -> faustNode.midiMessage(event.data)
     - create() drives voices (poly) via createFaustNode(...)
 
-## 1) Polyphony in faust_realtime_worker.mjs (post-refactor layout)
+## 1) Polyphony in faust_node_worker.mjs (post-refactor layout)
 
 Goal: compile mono or poly based on [nvoices:n] metadata or an explicit param.
 
@@ -36,8 +36,8 @@ Goal: compile mono or poly based on [nvoices:n] metadata or an explicit param.
 
 ```mermaid
 flowchart LR
-  Client[MCP client] -->|SSE/stdio| Server[faust_realtime_server.py]
-  Server -->|stdin/stdout JSON| Worker[faust_realtime_worker.mjs]
+  Client[MCP client] -->|SSE/stdio| Server[faust_node_server.py]
+  Server -->|stdin/stdout JSON| Worker[faust_node_worker.mjs]
   Worker -->|AudioWorklet| WebAudio[node-web-audio-api + faustwasm]
   UI[rt-ui.html] -->|HTTP JSON| Worker
   UI -->|POST /midi| Worker
@@ -47,10 +47,10 @@ flowchart LR
 MCP client
   |  SSE/stdio
   v
-faust_realtime_server.py (Python)
+faust_node_server.py (Python)
   |  stdin/stdout JSON
   v
-faust_realtime_worker.mjs (Node)
+faust_node_worker.mjs (Node)
   |  AudioWorklet -> node-web-audio-api + faustwasm
   |
   +-- HTTP JSON <---- rt-ui.html (browser)
@@ -60,14 +60,14 @@ faust_realtime_worker.mjs (Node)
 ### OS processes involved
 
 - MCP client process: MCP tool (LLM client, script, etc.) talking SSE/stdio to the server.
-- Python process: faust_realtime_server.py exposes MCP API and launches/controls the Node worker.
-- Node.js process: faust_realtime_worker.mjs runs in a separate Node process, handles WebAudio, faustwasm, and the HTTP UI server.
+- Python process: faust_node_server.py exposes MCP API and launches/controls the Node worker.
+- Node.js process: faust_node_worker.mjs runs in a separate Node process, handles WebAudio, faustwasm, and the HTTP UI server.
 - Browser process: rt-ui.html runs in a browser tab, calls the worker over HTTP and sends MIDI to /midi.
   Notes:
 - The UI HTTP server is inside the Node process (not a separate process).
 - Real-time audio output comes from the Node process, not the browser.
 
-1. Load FaustPolyDspGenerator in **FaustCompilerManager** (faust_realtime_worker.mjs):
+1. Load FaustPolyDspGenerator in **FaustCompilerManager** (faust_node_worker.mjs):
    - Extend ensureReady() to capture FaustPolyDspGenerator alongside FaustMonoDspGenerator.
    - Provide createPolyGenerator() similar to createGenerator().
 2. Add extractMidiAndNvoices(jsonMeta) (new helper):
@@ -89,7 +89,7 @@ faust_realtime_worker.mjs (Node)
 1. **Add metadata parser** in `faust_dsp_utils.mjs`:
    - Implement `extractMidiAndNvoices(jsonMeta)` returning `{ midiEnabled, nvoices }`.
    - Parse `json.meta` for `options` entry; read `[midi:on]` and `[nvoices:n]`.
-2. **Extend compiler manager** in `faust_realtime_worker.mjs`:
+2. **Extend compiler manager** in `faust_node_worker.mjs`:
    - In `FaustCompilerManager.ensureReady()`, capture `FaustPolyDspGenerator`.
    - Add `createPolyGenerator()` method.
 3. **Two‑phase compile in WorkerRuntime.compileAndStart**:
@@ -173,7 +173,7 @@ Goal: allow rt-ui.html to send MIDI.
 
 Goal: expose poly controls on MCP.
 
-1. Extend compile_and_start in https://github.com/grame-cncm/faust-mcp/blob/main/faust_realtime_server.py:
+1. Extend compile_and_start in https://github.com/grame-cncm/faust-mcp/blob/main/faust_node_server.py:
    - nvoices?: number
    - force_poly?: boolean
 2. Forward these params to the worker.
@@ -205,7 +205,7 @@ Goal: clear feedback.
    import("stdfaust.lib");
    process = pm.pluckString;
    ```
-2. Start faust_realtime_server.py + UI.
+2. Start faust_node_server.py + UI.
 3. Verify:
    - status returns poly_nvoices and midi_enabled: true.
    - MIDI UI lists devices.

@@ -70,9 +70,9 @@ export class WebSocketMetricsServer {
   /**
    * @param {object} params
    * @param {object} params.runtime
-   * @param {string} params.schemaVersion
+   * @param {string} params.schema_version
    */
-  constructor({ runtime, schemaVersion }) {
+  constructor({ runtime, schema_version: schemaVersion }) {
     this.runtime = runtime;
     this.schemaVersion = schemaVersion;
     this.clients = new Set();

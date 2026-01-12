@@ -96,7 +96,7 @@
 Goal: replace high‑rate HTTP polling with a push channel for analysis data.
 
 1. **Server endpoint placement**
-   - Prefer adding WS to the same HTTP server that serves `rt-ui` (currently `faust_realtime_server.py`).
+   - Prefer adding WS to the same HTTP server that serves `rt-ui` (currently `faust_node_server.py`).
    - If a dedicated Node UI server exists in the future, reuse the same WS message format.
 2. **Server behavior**
    - Add a `/ws` endpoint, local‑only by default (same origin).

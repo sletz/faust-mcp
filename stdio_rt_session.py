@@ -71,7 +71,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--server",
-        default="faust_realtime_server.py",
+        default="faust_node_server.py",
         help="Path to the real-time MCP server entrypoint.",
     )
     parser.add_argument(

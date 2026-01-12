@@ -20,7 +20,7 @@ at a controlled cadence.
 
 ```
 rt-ui.js  ->  /ws (subscribe)
-server    ->  getAudioMetrics()
+server    ->  get_audio_metrics()
 server    ->  /ws (metrics)
 rt-ui.js  ->  render scope/spectrum/probe
 ```
@@ -79,7 +79,8 @@ Notes:
 }
 ```
 
-The `payload` matches the structure returned by `/audio-metrics`.
+The `payload` matches the structure returned by `/audio-metrics` (from the
+`get_audio_metrics` MCP tool).
 
 ### Ping / Pong
 

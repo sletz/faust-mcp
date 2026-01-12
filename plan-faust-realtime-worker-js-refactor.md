@@ -1,4 +1,4 @@
-# JS Refactor Log - `faust_realtime_worker.mjs`
+# JS Refactor Log - `faust_node_worker.mjs`
 
 ## Step 1 - Extract metrics runtime into a class
 
@@ -40,7 +40,7 @@ class MetricsCollector {
 }
 ```
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 2 - Wire `compile_and_start` to the new class
 
@@ -50,7 +50,7 @@ Changes:
   - `metricsCollector.attach(audioContext, faustNode, faustJson)`
 - Ensures the analyser graph is created and connected only once per compile.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 3 - Delegate metrics request handling
 
@@ -58,7 +58,7 @@ Changes:
 - `get_audio_metrics` now calls `metricsCollector.getMetrics(...)`.
 - `computeAudioMetrics(...)` accepts caches from the collector (no global reads).
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 4 - Centralize cleanup in `stop()`
 
@@ -66,7 +66,7 @@ Changes:
 - `stop()` now calls `metricsCollector.reset()` to clear analysers and caches.
 - Output/meter caches are re-initialized and reattached to the collector.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 5 - Introduce `WorkerRuntime` for compile/stop lifecycle
 
@@ -116,7 +116,7 @@ class WorkerRuntime {
 }
 ```
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 6 - Move parameter APIs into `WorkerRuntime`
 
@@ -129,7 +129,7 @@ Changes:
 - Simplified top-level handlers to delegate to `workerRuntime`.
 - Removed the redundant `ensureRunning()` helper at the module level.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 7 - Extract `UiServer`
 
@@ -142,7 +142,7 @@ Changes:
   `/param`, and static `faust-ui` assets) into the class.
 - Updated the worker startup to instantiate and start the UI server.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 8 - Extract `ProtocolServer`
 
@@ -154,7 +154,7 @@ Changes:
 - Centralized JSON parse + dispatch + response formatting inside the class.
 - Main file now constructs `ProtocolServer` with the handlers map and starts it.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 9 - Add `WorkerContext`
 
@@ -167,7 +167,7 @@ Changes:
 - Replaced global `WEB_AUDIO_ROOT`, `UI_PORT`, `UI_ROOT`, and path resolution
   constants with context properties.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 10 - Add `FaustCompilerManager`
 
@@ -179,7 +179,7 @@ Changes:
 - `WorkerRuntime` now uses the manager to get `AudioContext`, compiler, and
   generator instances.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Step 11 - Extract DSP/UI helpers
 
@@ -188,10 +188,10 @@ Goal: move DSP wrapping and Faust JSON parsing helpers into a shared module.
 Changes:
 - Added `faust_dsp_utils.mjs` with `wrapTestInputs`, `extractParamsFromJson`,
   `extractBargraphUnits`, and `extractBargraphProbes`.
-- Removed the helper implementations from `faust_realtime_worker.mjs` and
+- Removed the helper implementations from `faust_node_worker.mjs` and
   replaced them with imports.
 
-Files updated: `faust_realtime_worker.mjs`, `faust_dsp_utils.mjs`
+Files updated: `faust_node_worker.mjs`, `faust_dsp_utils.mjs`
 
 ## Step 12 - Extract metrics helpers
 
@@ -201,10 +201,10 @@ Changes:
 - Added `metrics_utils.mjs` with `computeAudioMetrics`,
   `normalizeAudioMetricsOptions`, `collectScopePayload`, and
   `collectSpectrumPayload` (plus internal helpers).
-- Removed the metrics helper implementations from `faust_realtime_worker.mjs`
+- Removed the metrics helper implementations from `faust_node_worker.mjs`
   and replaced them with imports.
 
-Files updated: `faust_realtime_worker.mjs`, `metrics_utils.mjs`
+Files updated: `faust_node_worker.mjs`, `metrics_utils.mjs`
 
 ## Step 13 - Add `WorkerApp`
 
@@ -218,7 +218,7 @@ Changes:
 - Removed the top-level `checkSyntax` / `compileAndStart` / param helper
   functions in favor of runtime and compiler-manager methods.
 
-File updated: `faust_realtime_worker.mjs`
+File updated: `faust_node_worker.mjs`
 
 ## Next steps
 

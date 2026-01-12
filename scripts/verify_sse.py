@@ -129,9 +129,9 @@ def main() -> int:
     if args.skip_rt:
         return 0
 
-    # Server 3: faust_realtime_server.py (WebAudio runtime)
+    # Server 3: faust_node_server.py (WebAudio runtime)
     if shutil.which("node") is None:
-        print("Skipping faust_realtime_server.py: `node` not found in PATH.")
+        print("Skipping faust_node_server.py: `node` not found in PATH.")
         return 0
 
     env = {
@@ -140,7 +140,7 @@ def main() -> int:
         "MCP_HOST": "127.0.0.1",
         "MCP_PORT": "8002",
     }
-    s3 = _start_server([sys.executable, "faust_realtime_server.py"], env=env)
+    s3 = _start_server([sys.executable, "faust_node_server.py"], env=env)
     try:
         _wait_ready(2)
         _run([

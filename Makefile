@@ -21,28 +21,29 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-rt setup-ui setup-ui-browser setup-midi clean smoke-test run-sse run-stdio run-daw run-rt run-rt-ui run-rt-stdio run-rt-stdio-ui run-rt-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt test-browser-api
+.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt test-node-api test-browser-api
 
 help:
 	@printf "Targets:\n"
 	@printf "  setup        Create tmp/ and install Python deps\n"
-	@printf "  setup-rt     Install node-web-audio-api deps and build native module\n"
+	@printf "  setup-node   Install node-web-audio-api deps and build native module\n"
 	@printf "  setup-ui     Install @shren/faust-ui in this repo\n"
-	@printf "  setup-ui-browser Install browser UI deps (Faust UI + faustwasm)\n"
+	@printf "  setup-browser-ui Install browser UI deps (Faust UI + faustwasm)\n"
 	@printf "  setup-midi   Init node-midi submodule and install native deps\n"
 	@printf "  clean        Remove tmp/ and server logs\n"
 	@printf "  smoke-test   Run a basic stdio test against both servers\n"
 	@printf "  run-sse      Start the MCP server over SSE\n"
 	@printf "  run-stdio    Start the MCP server over stdio\n"
 	@printf "  run-daw      Start the DawDreamer MCP server over SSE\n"
-	@printf "  run-rt       Start the real-time MCP server over SSE\n"
-	@printf "  run-rt-ui    Start real-time MCP server with UI bridge\n"
-	@printf "  run-rt-stdio Start real-time MCP server over stdio\n"
-	@printf "  run-rt-stdio-ui Start real-time MCP server over stdio with UI bridge\n"
-	@printf "  run-rt-stdio-session Start a persistent stdio session (multi-DSP)\n"
+	@printf "  run-node     Start the real-time MCP server over SSE\n"
+	@printf "  run-node-ui  Start real-time MCP server with UI bridge\n"
+	@printf "  run-node-stdio Start real-time MCP server over stdio\n"
+	@printf "  run-node-stdio-ui Start real-time MCP server over stdio with UI bridge\n"
+	@printf "  run-node-stdio-session Start a persistent stdio session (multi-DSP)\n"
 	@printf "  run-browser-ui Start browser-only runtime (SSE + static UI)\n"
 	@printf "  run-browser-stdio Start browser-only runtime (stdio + static UI)\n"
 	@printf "  run-browser-static Start only a static server (open /rt-browser-ui.html)\n"
+	@printf "  test-node-api Run the node-only API test script\n"
 	@printf "  test-browser-api Run the browser-only API test script\n"
 	@printf "  stop-rt      Stop the real-time server (SSE or stdio)\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
@@ -92,14 +93,14 @@ setup:
 	@mkdir -p $(TMPDIR)
 	$(PYTHON) -m pip install -r requirements.txt
 
-setup-rt:
+setup-node:
 	git submodule update --init --remote $(WEBAUDIO_ROOT)
 	cd $(WEBAUDIO_ROOT) && npm install && npm up && npm run build
 
 setup-ui:
 	cd ui && npm install
 
-setup-ui-browser:
+setup-browser-ui:
 	cd ui && npm install && npm install @grame/faustwasm
 
 setup-midi:
@@ -142,23 +143,23 @@ client-daw:
 		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
 		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),)
 
-run-rt:
+run-node:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
-	$(PYTHON) faust_realtime_server.py
+	$(PYTHON) faust_node_server.py
 
-run-rt-ui:
+run-node-ui:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
 	MCP_TRANSPORT=sse MCP_HOST=$(MCP_HOST) MCP_PORT=$(MCP_PORT) \
-	$(PYTHON) faust_realtime_server.py
+	$(PYTHON) faust_node_server.py
 
-run-rt-stdio:
+run-node-stdio:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) MCP_TRANSPORT=stdio \
-	$(PYTHON) faust_realtime_server.py
+	$(PYTHON) faust_node_server.py
 
-run-rt-stdio-ui:
+run-node-stdio-ui:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
 	MCP_TRANSPORT=stdio \
-	$(PYTHON) faust_realtime_server.py
+	$(PYTHON) faust_node_server.py
 
 run-rt-stdio-session:
 	WEBAUDIO_ROOT=$(WEBAUDIO_ROOT) FAUST_UI_PORT=$(FAUST_UI_PORT) FAUST_UI_ROOT=$(FAUST_UI_ROOT) \
@@ -174,6 +175,9 @@ run-browser-stdio:
 
 run-browser-static:
 	$(PYTHON) -m http.server 8010 --directory ui
+
+test-node-api:
+	./scripts/test_full_api_node.sh
 
 test-browser-api:
 	./scripts/test_full_api_browser.sh
@@ -226,14 +230,14 @@ rt-ws-metrics:
 rt-stop:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop
 
-stop-rt:
+stop-node:
 	@if [ "$(MCP_TRANSPORT)" = "stdio" ]; then \
-		pkill -f "faust_realtime_server.py" || true; \
-		pkill -f "faust_realtime_worker.mjs" || true; \
+		pkill -f "faust_node_server.py" || true; \
+		pkill -f "faust_node_worker.mjs" || true; \
 	else \
 		$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool stop >/dev/null 2>&1 || true; \
-		pkill -f "faust_realtime_server.py" || true; \
-		pkill -f "faust_realtime_worker.mjs" || true; \
+		pkill -f "faust_node_server.py" || true; \
+		pkill -f "faust_node_worker.mjs" || true; \
 	fi
 
 smoke-test:

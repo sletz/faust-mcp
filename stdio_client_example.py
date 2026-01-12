@@ -108,8 +108,8 @@ if __name__ == "__main__":
     parser.add_argument("--dsp", default="t1.dsp", help="Path to a Faust DSP file.")
     parser.add_argument(
         "--server",
-        default="faust_server.py",
-        help="Path to the MCP server entrypoint.",
+        default="faust_node_server.py",
+        help="Path to the real-time MCP server entrypoint.",
     )
     parser.add_argument(
         "--tool",

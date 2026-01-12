@@ -2,12 +2,12 @@
 
 ## Goal
 
-Remove `faust_realtime_server.py` and run the real-time MCP server entirely in Node (using the existing `faust_realtime_worker.mjs` runtime + HTTP UI bridge).
+Remove `faust_node_server.py` and run the real-time MCP server entirely in Node (using the existing `faust_node_worker.mjs` runtime + HTTP UI bridge).
 
 ## Current Architecture (Summary)
 
 - **Python (FastMCP)** exposes MCP tools over SSE/stdio.
-- **Node worker (`faust_realtime_worker.mjs`)** does DSP compile/start, audio, metrics, and UI HTTP endpoints.
+- **Node worker (`faust_node_worker.mjs`)** does DSP compile/start, audio, metrics, and UI HTTP endpoints.
 - Python bridges MCP requests to Node over JSON lines (stdin/stdout).
 
 ## Target Architecture
@@ -28,14 +28,14 @@ install” distribution may still need prebuilt binaries or a build step.
 ## Key Decisions
 
 - Transport choice: implement **SSE** first (parity with current default), then stdio if needed.
-- Keep `faust_realtime_worker.mjs` as the runtime module, and add a **Node MCP server entrypoint** that imports it.
+- Keep `faust_node_worker.mjs` as the runtime module, and add a **Node MCP server entrypoint** that imports it.
 - Preserve tool names and payload shapes to avoid breaking clients.
 
 ## Step-by-Step Plan
 
 ### Phase 1 - Factor Node runtime into a reusable module
 
-1. Export a small **runtime adapter** from `faust_realtime_worker.mjs`:
+1. Export a small **runtime adapter** from `faust_node_worker.mjs`:
    - `createRuntime()` -> object with tool handlers (compile, start, get_audio_metrics, etc.).
    - `startUiServer()` remains available for UI bridge.
 2. Keep the existing CLI behavior for backward compatibility (stdio JSON line protocol).
@@ -84,6 +84,6 @@ install” distribution may still need prebuilt binaries or a build step.
 ## Deliverables
 
 - New Node MCP server entrypoint (SSE first).
-- Updated runtime adapter exported from `faust_realtime_worker.mjs`.
+- Updated runtime adapter exported from `faust_node_worker.mjs`.
 - Updated Makefile + README + test scripts.
-- Optional: deprecate or remove `faust_realtime_server.py` once stable.
+- Optional: deprecate or remove `faust_node_server.py` once stable.

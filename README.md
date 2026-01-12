@@ -9,7 +9,7 @@ This repository provides four MCP servers that compile, render, or play Faust DS
 
 - `faust_server.py`: C++ compile pipeline (Faust CLI + g++).
 - `faust_server_daw.py`: DawDreamer offline render pipeline.
-- `faust_realtime_server.py`: real-time playback via node-web-audio-api + Faust WASM.
+- `faust_node_server.py`: real-time playback via node-web-audio-api + Faust WASM.
 - `faust_browser_server.py`: browser-only runtime proxy + static server.
 
 For MCP protocol background, see:
@@ -19,9 +19,9 @@ For MCP protocol background, see:
 
 - `faust_server.py`: MCP server entrypoint (FastMCP) and tool implementation.
 - `faust_server_daw.py`: DawDreamer-based MCP server (no C++ compile step).
-- `faust_realtime_server.py`: Real-time MCP server using node-web-audio-api + Faust WASM.
+- `faust_node_server.py`: Real-time MCP server using node-web-audio-api + Faust WASM.
 - `faust_browser_server.py`: Browser-only runtime proxy + static server.
-- `faust_realtime_worker.mjs`: Node worker that hosts the real-time DSP graph.
+- `faust_node_worker.mjs`: Node worker that hosts the real-time DSP graph.
 - `analysis_arch.cpp`: Faust C++ architecture used to generate analysis data.
 - `t1.dsp`, `t2.dsp`, `noise.dsp`, `probe.dsp`: Example Faust DSP programs.
 - `sse_client_example.py`: SSE client example.
@@ -39,9 +39,9 @@ but differ in how they compile/render Faust DSP code.
 flowchart LR
   LLM[LLM / MCP Client] -->|SSE or stdio| MCP[MCP Server]
 
-  subgraph Server3["S3:faust_realtime_server.py"]
+  subgraph Server3["S3:faust_node_server.py"]
     S3["MCP tool calls"] --> PY[Python MCP server]
-    PY -->|stdin/stdout JSON| NODE[faust_realtime_worker.mjs]
+    PY -->|stdin/stdout JSON| NODE[faust_node_worker.mjs]
     NODE --> NWA[node-web-audio-api + faustwasm]
     NODE --> UI["Optional UI server: faust UI or fallback"]
   end
@@ -321,7 +321,7 @@ Example output (truncated):
 }
 ```
 
-## Server 3: Real-time WebAudio Pipeline (`faust_realtime_server.py`)
+## Server 3: Real-time WebAudio Pipeline (`faust_node_server.py`)
 
 ### What it does
 
@@ -346,7 +346,7 @@ Environment variables:
 - `WEBAUDIO_ROOT`: node-web-audio-api path (default `external/node-web-audio-api`)
 - `FAUST_UI_PORT`: enable UI server on this port (optional)
 - `FAUST_UI_ROOT`: path to a built `faust-ui` bundle (optional, overrides auto-detect)
-- `FAUST_WORKER_PATH`: absolute path to `faust_realtime_worker.mjs` (optional)
+- `FAUST_WORKER_PATH`: absolute path to `faust_node_worker.mjs` (optional)
 
 Submodule setup (one-time):
 
@@ -380,7 +380,7 @@ npm run build:ts
 ```bash
 WEBAUDIO_ROOT=external/node-web-audio-api \
 MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
-python3 faust_realtime_server.py
+python3 faust_node_server.py
 ```
 
 ### Optional UI bridge
@@ -391,7 +391,7 @@ it. You can also point `FAUST_UI_ROOT` to a custom bundle directory so the page
 can load `/faust-ui/index.js` and use it instead of the fallback UI.
 
 The UI page (`ui/rt-ui.html`) connects to the running DSP over a lightweight
-HTTP JSON API hosted by the Node worker (`faust_realtime_worker.mjs`) using
+HTTP JSON API hosted by the Node worker (`faust_node_worker.mjs`) using
 Node's built-in `http` server. This is separate from the MCP transport: MCP
 still runs over SSE/stdio between the Python server and the client, while the UI
 talks directly to the worker via HTTP.
@@ -425,7 +425,7 @@ For details on the WebSocket analysis stream, see `docs/ws-metrics.md`.
 WEBAUDIO_ROOT=external/node-web-audio-api \
 FAUST_UI_PORT=8787 FAUST_UI_ROOT=/path/to/faust-ui/dist/esm \
 MCP_TRANSPORT=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 \
-python3 faust_realtime_server.py
+python3 faust_node_server.py
 ```
 
 If you want Claude Code over stdio and the UI at the same time, run the server
@@ -435,7 +435,7 @@ in stdio mode with `FAUST_UI_PORT` set:
 WEBAUDIO_ROOT=external/node-web-audio-api \
 FAUST_UI_PORT=8787 FAUST_UI_ROOT=/path/to/faust-ui/dist/esm \
 MCP_TRANSPORT=stdio \
-python3 faust_realtime_server.py
+python3 faust_node_server.py
 ```
 
 Then open:
@@ -523,13 +523,13 @@ If you want both runtimes available, add two entries:
     "faust-node": {
       "command": "python3",
       "args": [
-        "/path/to/faust-mcp/faust_realtime_server.py"
+        "/path/to/faust-mcp/faust_node_server.py"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
         "WEBAUDIO_ROOT": "/path/to/faust-mcp/external/node-web-audio-api",
         "FAUST_UI_PORT": "8787",
-        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_realtime_worker.mjs"
+        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_node_worker.mjs"
       }
     },
     "faust-browser": {
@@ -691,7 +691,7 @@ make rt-compile DSP=t2.dsp HIDE_METERS=1
 Stdio client example:
 
 ```bash
-python3 stdio_client_example.py --server faust_realtime_server.py \
+python3 stdio_client_example.py --server faust_node_server.py \
   --tool compile_and_start --dsp t2.dsp --hide-meters
 ```
 
@@ -706,7 +706,7 @@ python3 -m http.server 9000
 
 The real-time server runs a Node worker process and talks to it over stdin/stdout:
 
-- `faust_realtime_server.py` starts the worker with `node faust_realtime_worker.mjs`
+- `faust_node_server.py` starts the worker with `node faust_node_worker.mjs`
   (override with `FAUST_WORKER_PATH`) and passes `WEBAUDIO_ROOT` in the environment.
 - The worker reads JSON lines like:
   `{ "id": 1, "method": "compile_and_start", "params": {...} }`
@@ -812,7 +812,7 @@ node scripts/emit_wrapped_dsp.mjs --dsp poly_fx.dsp --out poly_fx_wrapped.dsp
 
 Example flow for Claude Code or another MCP-capable LLM:
 
-1. Start the desired server (`faust_server.py`, `faust_server_daw.py`, or `faust_realtime_server.py`).
+1. Start the desired server (`faust_server.py`, `faust_server_daw.py`, or `faust_node_server.py`).
 2. The LLM connects over SSE or stdio and lists available tools.
 3. The LLM sends DSP code to `compile_and_analyze` (offline servers) or `compile_and_start` (real-time).
 4. The server returns analysis metrics (offline) or parameter metadata (real-time).
@@ -976,17 +976,18 @@ scripts/test_ws_metrics.py --url ws://127.0.0.1:8787/ws --include-scope --includ
 ### stdio client
 
 ```bash
+# Defaults to faust_node_server.py; pass --server to target other servers.
 python3 stdio_client_example.py --dsp t1.dsp
 ```
 
 Real-time over stdio:
 
 ```bash
-MCP_TRANSPORT=stdio python3 faust_realtime_server.py
+MCP_TRANSPORT=stdio python3 faust_node_server.py
 ```
 
 ```bash
-python3 stdio_client_example.py --server faust_realtime_server.py \
+python3 stdio_client_example.py --server faust_node_server.py \
   --tool compile_and_start --dsp t1.dsp --name fx --latency interactive \
   --input-source noise
 ```
@@ -1011,7 +1012,7 @@ python3 stdio_client_example.py --server faust_server_daw.py --dsp t1.dsp \
 
 # Real-time server (SSE)
 WEBAUDIO_ROOT=external/node-web-audio-api MCP_PORT=8000 \
-python3 faust_realtime_server.py
+python3 faust_node_server.py
 
 python3 sse_client_example.py --url http://127.0.0.1:8000/sse \
   --tool compile_and_start --dsp t1.dsp --name fx --latency interactive \
@@ -1043,8 +1044,8 @@ make stop-rt
 | `faust_server.py`          | stdio     | `stdio_client_example.py` / `make client-stdio` | Yes   |
 | `faust_server_daw.py`      | SSE       | `sse_client_example.py` / `make client-daw`     | Yes   |
 | `faust_server_daw.py`      | stdio     | `stdio_client_example.py`                       | Yes   |
-| `faust_realtime_server.py` | SSE       | `sse_client_example.py`                         | Yes   |
-| `faust_realtime_server.py` | stdio     | `stdio_client_example.py`                       | Yes   |
+| `faust_node_server.py` | SSE       | `sse_client_example.py`                         | Yes   |
+| `faust_node_server.py` | stdio     | `stdio_client_example.py`                       | Yes   |
 
 ## Client configuration examples
 
@@ -1073,13 +1074,13 @@ or pass `FAUST_WORKER_PATH` so the server can locate the Node worker:
   "mcpServers": {
     "faust": {
       "command": "python3",
-      "args": ["/path/to/faust-mcp/faust_realtime_server.py"],
+      "args": ["/path/to/faust-mcp/faust_node_server.py"],
       "cwd": "/path/to/faust-mcp",
       "env": {
         "MCP_TRANSPORT": "stdio",
         "WEBAUDIO_ROOT": "/path/to/faust-mcp/external/node-web-audio-api",
         "FAUST_UI_PORT": "8787",
-        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_realtime_worker.mjs"
+        "FAUST_WORKER_PATH": "/path/to/faust-mcp/faust_node_worker.mjs"
       }
     }
   }

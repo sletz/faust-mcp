@@ -9,7 +9,7 @@
 
 ## Non-Goals
 
-- No changes to `faust_realtime_server.py`, `faust_realtime_worker.mjs`, or `ui/rt-ui.*`.
+- No changes to `faust_node_server.py`, `faust_node_worker.mjs`, or `ui/rt-ui.*`.
 - No Node process for DSP/runtime in this architecture.
 - No attempt to run WebAudio headlessly.
 
@@ -50,8 +50,8 @@ used to expose MCP tools to external clients.
 
 ## Runtime API Contract (In-Browser)
 
-The browser runtime mirrors the tool surface from `faust_realtime_server.py` and
-`faust_realtime_worker.mjs` so MCP clients can switch between runtimes.
+The browser runtime mirrors the tool surface from `faust_node_server.py` and
+`faust_node_worker.mjs` so MCP clients can switch between runtimes.
 
 Required runtime methods:
 

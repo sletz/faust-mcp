@@ -3,7 +3,7 @@ Real-time Faust MCP server using node-web-audio-api + @grame/faustwasm.
 
 This server exposes tools to compile Faust DSP code on the fly, start playback,
 and control parameters. It delegates audio + DSP work to a Node worker process
-(`faust_realtime_worker.mjs`) and communicates via a JSON-over-stdin protocol.
+(`faust_node_worker.mjs`) and communicates via a JSON-over-stdin protocol.
 
 Tools:
   - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
@@ -47,7 +47,7 @@ WEBAUDIO_ROOT = os.environ.get(
 )
 
 WORKER_PATH = os.environ.get(
-    "FAUST_WORKER_PATH", os.path.abspath("faust_realtime_worker.mjs")
+    "FAUST_WORKER_PATH", os.path.abspath("faust_node_worker.mjs")
 )
 
 mcp = FastMCP(
