@@ -40,13 +40,23 @@
     </header>
 
     <main class="app-main">
-      <section class="panel panel-faust">
-        <div class="panel-header">Faust UI</div>
-        <div id="faust-ui-container">
-          <div id="faust-ui-root"></div>
-        </div>
-        <div id="fallback-ui"></div>
-      </section>
+      <div class="left-column">
+        <section class="panel panel-faust">
+          <div class="panel-header">Faust UI</div>
+          <div id="faust-ui-container">
+            <div id="faust-ui-root"></div>
+          </div>
+          <div id="fallback-ui"></div>
+        </section>
+      </div>
+
+      <div
+        class="column-splitter"
+        id="column-splitter"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize columns"
+      ></div>
 
       <div class="right-column">
         <section class="panel panel-scope">

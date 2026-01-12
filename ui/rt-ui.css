@@ -153,9 +153,25 @@ body {
 .app-main {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  grid-template-columns:
+    minmax(260px, var(--left-column-width, 1fr))
+    var(--splitter-width, 16px)
+    minmax(130px, 2fr);
+  row-gap: var(--gap-lg);
+  column-gap: 0;
+  min-height: 0;
+}
+
+.left-column {
+  display: flex;
+  flex-direction: column;
   gap: var(--gap-lg);
   min-height: 0;
+  min-width: 0;
+}
+
+.right-column {
+  min-width: 0;
 }
 
 .app-shell.is-right-collapsed .app-main {
@@ -164,6 +180,43 @@ body {
 
 .app-shell.is-right-collapsed .right-column {
   display: none;
+}
+
+.app-shell.is-right-collapsed .column-splitter {
+  display: none;
+}
+
+.column-splitter {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.column-splitter::before,
+.column-splitter::after {
+  content: "";
+  position: absolute;
+  top: 28px;
+  bottom: 28px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.column-splitter::before {
+  left: calc(50% - 4px);
+}
+
+.column-splitter::after {
+  left: calc(50% + 4px);
+}
+
+.column-splitter:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.column-splitter:active {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .right-column {
@@ -586,6 +639,10 @@ body {
 @media (max-width: 980px) {
   .app-main {
     grid-template-columns: 1fr;
+  }
+
+  .column-splitter {
+    display: none;
   }
 
   .app-header {

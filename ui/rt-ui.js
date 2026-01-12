@@ -32,8 +32,14 @@ class RtUiApp {
     this.wsRetryMs = 2000;
     this.wsRetryTimer = null;
     this.fallbackControls = new Map();
+    this.columnSplit = {
+      minLeft: 260,
+      minRight: 130,
+      isDragging: false,
+    };
     this.dom = {
       appShell: document.querySelector('.app-shell'),
+      appMain: document.querySelector('.app-main'),
       status: document.getElementById('status'),
       dspName: document.getElementById('dsp-name'),
       faustRoot: document.getElementById('faust-ui-root'),
@@ -59,6 +65,7 @@ class RtUiApp {
       probeCanvas: document.getElementById('probe-canvas'),
       probeLabel: document.getElementById('probe-label'),
       probeMeta: document.getElementById('probe-meta'),
+      columnSplitter: document.getElementById('column-splitter'),
     };
     this.lastSpectrumFetch = 0;
   }
@@ -144,6 +151,77 @@ class RtUiApp {
     } catch (_) {
       this.setAnalysisVisibility(true);
     }
+  }
+
+  // Restore the stored left column width, if any.
+  restoreColumnWidth() {
+    const root = this.dom.appShell;
+    if (!root) return;
+    try {
+      const value = localStorage.getItem('rt-ui-left-column-width');
+      if (!value) return;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return;
+      this.setLeftColumnWidth(parsed);
+    } catch (_) {}
+  }
+
+  // Apply a left column width in pixels.
+  setLeftColumnWidth(width) {
+    const root = this.dom.appShell;
+    if (!root) return;
+    const rounded = Math.round(width);
+    root.style.setProperty('--left-column-width', `${rounded}px`);
+    if (this.dom.columnSplitter) {
+      this.dom.columnSplitter.setAttribute('aria-valuenow', String(rounded));
+    }
+  }
+
+  // Get the splitter width from CSS.
+  getSplitterWidth() {
+    if (!this.dom.appMain) return 16;
+    const value = getComputedStyle(this.dom.appMain).getPropertyValue('--splitter-width');
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 16;
+  }
+
+  // Bind pointer events for the column splitter.
+  bindColumnSplitter() {
+    const splitter = this.dom.columnSplitter;
+    if (!splitter || !this.dom.appMain || !this.dom.appShell) return;
+    splitter.addEventListener('pointerdown', (event) => {
+      if (this.dom.appShell.classList.contains('is-right-collapsed')) return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      splitter.setPointerCapture(event.pointerId);
+      this.columnSplit.isDragging = true;
+    });
+
+    splitter.addEventListener('pointermove', (event) => {
+      if (!this.columnSplit.isDragging) return;
+      const rect = this.dom.appMain.getBoundingClientRect();
+      const splitterWidth = this.getSplitterWidth();
+      const minLeft = this.columnSplit.minLeft;
+      const minRight = this.columnSplit.minRight;
+      const maxLeft = rect.width - minRight - splitterWidth;
+      const nextLeft = Math.min(
+        maxLeft,
+        Math.max(minLeft, event.clientX - rect.left)
+      );
+      this.setLeftColumnWidth(nextLeft);
+    });
+
+    splitter.addEventListener('pointerup', () => {
+      if (!this.columnSplit.isDragging) return;
+      this.columnSplit.isDragging = false;
+      try {
+        const value = getComputedStyle(this.dom.appShell).getPropertyValue('--left-column-width');
+        const parsed = Number.parseFloat(value);
+        if (Number.isFinite(parsed)) {
+          localStorage.setItem('rt-ui-left-column-width', String(parsed));
+        }
+      } catch (_) {}
+    });
   }
 
   // Send a parameter update to the UI server.
@@ -929,8 +1007,12 @@ class RtUiApp {
         this.setAnalysisVisibility(isHidden);
       });
     }
+    if (this.dom.columnSplitter) {
+      this.bindColumnSplitter();
+    }
     this.restoreCompactMode();
     this.restoreAnalysisVisibility();
+    this.restoreColumnWidth();
     window.addEventListener('resize', () => this.updateFaustUiScale());
     this.setupScopeTabs();
     this.setupScopeChannel();

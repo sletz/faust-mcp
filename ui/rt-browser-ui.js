@@ -37,6 +37,11 @@ class RtBrowserUiApp {
     this.diagramSvgs = null;
     this.diagramHistory = [];
     this.diagramCurrent = null;
+    this.columnSplit = {
+      minLeft: 260,
+      minRight: 130,
+      isDragging: false,
+    };
     this.loader = {
       textarea: null,
       compileBtn: null,
@@ -46,6 +51,7 @@ class RtBrowserUiApp {
     };
     this.dom = {
       appShell: document.querySelector('.app-shell'),
+      appMain: document.querySelector('.app-main'),
       status: document.getElementById('status'),
       dspName: document.getElementById('dsp-name'),
       faustRoot: document.getElementById('faust-ui-root'),
@@ -72,6 +78,7 @@ class RtBrowserUiApp {
       diagramBack: document.getElementById('diagram-back'),
       diagramBody: document.getElementById('diagram-body'),
       diagramContainer: document.getElementById('diagram-container'),
+      columnSplitter: document.getElementById('column-splitter'),
     };
   }
 
@@ -179,6 +186,85 @@ class RtBrowserUiApp {
   }
 
   /**
+   * Restore the stored left column width, if any.
+   */
+  restoreColumnWidth() {
+    if (!this.dom.appShell) return;
+    try {
+      const value = localStorage.getItem('rt-browser-left-column-width');
+      if (!value) return;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return;
+      this.setLeftColumnWidth(parsed);
+    } catch (_) {}
+  }
+
+  /**
+   * Apply a left column width in pixels.
+   * @param {number} width
+   */
+  setLeftColumnWidth(width) {
+    if (!this.dom.appShell) return;
+    const rounded = Math.round(width);
+    this.dom.appShell.style.setProperty('--left-column-width', `${rounded}px`);
+    if (this.dom.columnSplitter) {
+      this.dom.columnSplitter.setAttribute('aria-valuenow', String(rounded));
+    }
+  }
+
+  /**
+   * Get the splitter width from CSS.
+   * @returns {number}
+   */
+  getSplitterWidth() {
+    if (!this.dom.appMain) return 16;
+    const value = getComputedStyle(this.dom.appMain).getPropertyValue('--splitter-width');
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 16;
+  }
+
+  /**
+   * Bind pointer events for the column splitter.
+   */
+  bindColumnSplitter() {
+    const splitter = this.dom.columnSplitter;
+    if (!splitter || !this.dom.appMain || !this.dom.appShell) return;
+    splitter.addEventListener('pointerdown', (event) => {
+      if (this.dom.appShell.classList.contains('is-right-collapsed')) return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      splitter.setPointerCapture(event.pointerId);
+      this.columnSplit.isDragging = true;
+    });
+
+    splitter.addEventListener('pointermove', (event) => {
+      if (!this.columnSplit.isDragging) return;
+      const rect = this.dom.appMain.getBoundingClientRect();
+      const splitterWidth = this.getSplitterWidth();
+      const minLeft = this.columnSplit.minLeft;
+      const minRight = this.columnSplit.minRight;
+      const maxLeft = rect.width - minRight - splitterWidth;
+      const nextLeft = Math.min(
+        maxLeft,
+        Math.max(minLeft, event.clientX - rect.left)
+      );
+      this.setLeftColumnWidth(nextLeft);
+    });
+
+    splitter.addEventListener('pointerup', () => {
+      if (!this.columnSplit.isDragging) return;
+      this.columnSplit.isDragging = false;
+      try {
+        const value = getComputedStyle(this.dom.appShell).getPropertyValue('--left-column-width');
+        const parsed = Number.parseFloat(value);
+        if (Number.isFinite(parsed)) {
+          localStorage.setItem('rt-browser-left-column-width', String(parsed));
+        }
+      } catch (_) {}
+    });
+  }
+
+  /**
    * Wire top-level UI events.
    */
   bindEvents() {
@@ -193,6 +279,9 @@ class RtBrowserUiApp {
         const isHidden = this.dom.appShell.classList.contains('is-right-collapsed');
         this.setAnalysisVisibility(isHidden);
       });
+    }
+    if (this.dom.columnSplitter) {
+      this.bindColumnSplitter();
     }
   }
 
@@ -1325,6 +1414,7 @@ class RtBrowserUiApp {
   async init() {
     this.restoreCompactMode();
     this.restoreAnalysisVisibility();
+    this.restoreColumnWidth();
     this.bindEvents();
     this.setupScopeTabs();
     this.setupScopeChannel();

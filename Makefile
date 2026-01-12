@@ -21,7 +21,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-rt test-node-api test-browser-api
+.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-node test-node-api test-browser-api
 
 help:
 	@printf "Targets:\n"
@@ -45,7 +45,7 @@ help:
 	@printf "  run-browser-static Start only a static server (open /rt-browser-ui.html)\n"
 	@printf "  test-node-api Run the node-only API test script\n"
 	@printf "  test-browser-api Run the browser-only API test script\n"
-	@printf "  stop-rt      Stop the real-time server (SSE or stdio)\n"
+	@printf "  stop-node    Stop the real-time server (SSE or stdio)\n"
 	@printf "  client-sse   Call the SSE server using t1.dsp\n"
 	@printf "  client-stdio Call the stdio server using t1.dsp\n"
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
