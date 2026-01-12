@@ -712,11 +712,6 @@ export function createBrowserRuntime(options = {}) {
   }
 
   /**
-   * Validate syntax only (no audio).
-   * @param {string} faust_code
-   * @param {string} [name]
-   */
-  /**
    * Run a syntax check on the provided DSP code.
    * @param {string} faust_code
    * @param {string} [name]
@@ -726,9 +721,6 @@ export function createBrowserRuntime(options = {}) {
     return compilerManager.checkSyntax({ dsp_code: faust_code, name });
   }
 
-  /**
-   * Compile DSP without starting audio.
-   */
   /**
    * Compile a DSP and return metadata without starting audio.
    */
@@ -1097,9 +1089,6 @@ export function createBrowserRuntime(options = {}) {
     return state.faust_node?.getParams?.() ?? state.params.map((p) => p.path);
   }
 
-  /**
-   * Return status metadata (running, name, midi, poly).
-   */
   /**
    * Return runtime status for the MCP client.
    */

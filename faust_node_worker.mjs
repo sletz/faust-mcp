@@ -189,7 +189,6 @@ class FaustCompilerManager {
   }
 }
 
-
 /**
  * Collects bargraph metrics plus optional scope/spectrum payloads.
  */
@@ -1019,7 +1018,6 @@ class WorkerRuntime {
 
     return this.withSchema({ status: 'ok', values });
   }
-
 
   /**
    * Set multiple parameter values on the running DSP.
