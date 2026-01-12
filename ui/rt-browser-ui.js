@@ -1316,7 +1316,6 @@ class RtBrowserUiApp {
           'input_file',
           'hide_meters',
         ],
-        get_svg_diagrams: ['name', 'args'],
         get_param: ['path'],
         set_param: ['path', 'value'],
         set_param_values: ['values'],

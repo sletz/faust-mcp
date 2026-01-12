@@ -287,13 +287,6 @@ def get_audio_metrics(
 
 
 @mcp.tool()
-def get_svg_diagrams(name: str | None = None, args: str | None = None) -> str:
-    """Return SVG diagram strings for the current DSP."""
-    result = _call_bridge("get_svg_diagrams", {"name": name, "args": args})
-    return json.dumps(result, indent=2)
-
-
-@mcp.tool()
 def get_midi_inputs() -> str:
     """List MIDI inputs from the browser runtime."""
     result = _call_bridge("get_midi_inputs")
