@@ -1,9 +1,31 @@
 /**
- * WebSocket metrics server used by the rt-node-ui for real-time analysis streaming.
+ * WebSocket metrics server used by the rt-node-ui for real-time analysis.
  *
- * Protocol (JSON messages over WS):
+ * Protocol overview:
+ * - Transport: raw WebSocket (no external library), on `GET /ws`.
+ * - Negotiation: basic RFC6455 handshake (Upgrade + Sec-WebSocket-Accept).
+ * - Encoding: application messages are UTF-8 JSON in text frames.
+ * - Flow: the server pushes metrics at a per-client cadence.
  *
- * Client -> Server (subscribe)
+ * WebSocket format and protocol (plain-language intro):
+ * - WebSocket is a long-lived TCP connection between a client and a server.
+ * - It starts as a normal HTTP request, then "upgrades" to WebSocket.
+ * - After upgrade, both sides can send data at any time (full-duplex).
+ * - Data travels in small "frames" that carry a type (text/binary/ping/etc.).
+ * - This server uses text frames that contain JSON strings.
+ * - Each JSON message has a `type` field that tells the receiver what it is.
+ * - The client controls what it wants by sending a "subscribe" message.
+ * - The server answers by streaming "metrics" messages over time.
+ * - Frame opcodes are standard: 0x1 (text), 0x8 (close), 0x9 (ping), 0xA (pong).
+ * - Reference: RFC 6455 https://www.rfc-editor.org/rfc/rfc6455
+ *
+ * Connection:
+ * - Upgrade is accepted only for `/ws` (otherwise the socket is closed).
+ * - Subscription params can be provided via query string on connect:
+ *   `ws://host/ws?include_scope=true&scope_fps=8...`
+ * - The client can also update its subscription via JSON messages.
+ *
+ * Client -> Server (subscribe / update)
  * ```json
  * {
  *   "type": "subscribe",
@@ -23,12 +45,13 @@
  * }
  * ```
  *
- * Fields:
- * - `include_scope` / `include_spectrum`: toggles for analysis payloads.
- * - `per_channel`: include `channels[]` arrays in scope/spectrum payloads.
- * - `scope_fps` / `spectrum_fps` / `probe_fps`: requested frame rates (server clamps).
- * - `probe_id`: optional probe id filter; if omitted, all probes are sent.
- * - analyser tuning: `fft_size`, `smoothing`, `min_db`, `max_db`, `edge_threshold`, `log_bins`.
+ * Primary fields:
+ * - `include_scope` / `include_spectrum`: enable scope/spectrum payload blocks.
+ * - `per_channel`: include per-channel `channels[]` arrays.
+ * - `scope_fps` / `spectrum_fps` / `probe_fps`: requested frame rates (clamped).
+ * - `probe_id`: optional probe filter; if omitted, all probes are sent.
+ * - Analyzer tuning: `fft_size`, `smoothing`, `min_db`, `max_db`,
+ *   `edge_threshold`, `log_bins` (all clamped by the server).
  *
  * Client -> Server (ping)
  * ```json
@@ -55,18 +78,21 @@
  * { "type": "pong", "timestamp_ms": 1735860123456 }
  * ```
  *
- * Notes:
+ * Implementation notes:
  * - Payload format mirrors `/audio-metrics`.
- * - Server decides actual cadence; frames may be dropped if not due.
+ * - Frames are sent only when due for a given client.
+ * - Each client keeps its own cadence timers (nextScopeAt, etc.).
+ * - Incoming client frames must be masked (RFC6455);
+ *   the decoder unmasks before parsing JSON.
  */
 import crypto from 'node:crypto';
 
 const WS_MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
-/**
- * WebSocket metrics server for streaming getAudioMetrics payloads.
- */
-export class WebSocketMetricsServer {
+  /**
+   * WebSocket server that streams getAudioMetrics to multiple clients.
+   */
+  export class WebSocketMetricsServer {
   /**
    * @param {object} params
    * @param {object} params.runtime
@@ -95,7 +121,8 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Attach upgrade handling to an HTTP server.
+   * Attach WebSocket upgrade handling to the HTTP server.
+   * Uses the "upgrade" event to capture /ws requests.
    * @param {import('node:http').Server} server
    */
   attach(server) {
@@ -105,6 +132,7 @@ export class WebSocketMetricsServer {
 
   /**
    * Stop all clients and the broadcast loop.
+   * Uses socket.end() for a clean close.
    */
   stop() {
     for (const client of this.clients) {
@@ -117,7 +145,10 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Handle WebSocket upgrade requests.
+   * Handle WebSocket handshake and initialize client state.
+   * - Verifies `/ws`, then Sec-WebSocket-Key.
+   * - Responds 101 with Sec-WebSocket-Accept.
+   * - Initializes config from query string.
    * @param {import('node:http').IncomingMessage} req
    * @param {import('node:net').Socket} socket
    */
@@ -140,6 +171,7 @@ export class WebSocketMetricsServer {
       'Connection: Upgrade',
       `Sec-WebSocket-Accept: ${accept}`,
     ];
+    // Complete the RFC6455 handshake and switch the socket to WebSocket mode.
     socket.write(`${headers.join('\r\n')}\r\n\r\n`);
     const params = Object.fromEntries(url.searchParams.entries());
     const config = this.normalizeConfig(params);
@@ -152,6 +184,7 @@ export class WebSocketMetricsServer {
       nextSpectrumAt: now,
       nextProbeAt: now,
     };
+    // Track client state for later scheduling and updates.
     this.clients.add(client);
     this.startLoop();
     socket.on('data', (chunk) => this.handleData(client, chunk));
@@ -160,7 +193,8 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Handle incoming WebSocket data.
+   * Accumulate the binary stream and decode complete frames.
+   * Handles CLOSE/PING/PONG at the WebSocket level, delegates text frames.
    * @param {object} client
    * @param {Buffer} chunk
    */
@@ -170,20 +204,26 @@ export class WebSocketMetricsServer {
     client.buffer = remaining;
     frames.forEach((frame) => {
       if (frame.opcode === 0x8) {
+        // Client requested close.
         client.socket.end();
         return;
       }
       if (frame.opcode === 0x9) {
+        // Ping: respond with pong using the same payload.
         client.socket.write(this.encodeFrame(0xA, frame.payload));
         return;
       }
       if (frame.opcode !== 0x1) return;
+      // Text frame: parse JSON command.
       this.handleMessage(client, frame.payload.toString('utf8'));
     });
   }
 
   /**
-   * Apply a JSON message to a client config.
+   * Apply a JSON message to the client config.
+   * - `ping` yields an immediate `pong`.
+   * - `subscribe` (or known fields) updates the configuration.
+   * - Timers are reset so frames can be sent immediately.
    * @param {object} client
    * @param {string} message
    */
@@ -192,6 +232,7 @@ export class WebSocketMetricsServer {
     try {
       data = JSON.parse(message);
     } catch (_) {
+      // Ignore non-JSON payloads.
       return;
     }
     if (!data || typeof data !== 'object') return;
@@ -200,6 +241,7 @@ export class WebSocketMetricsServer {
       client.socket.write(this.encodeText(payload));
       return;
     }
+    // Subscribe message can be explicit or inferred by known fields.
     const isSubscribe = data.type === 'subscribe'
       || data.include_scope !== undefined
       || data.include_spectrum !== undefined
@@ -213,13 +255,14 @@ export class WebSocketMetricsServer {
       ...this.normalizeConfig(data),
     };
     const now = Date.now();
+    // Reset cadence so updated settings take effect immediately.
     client.nextScopeAt = now;
     client.nextSpectrumAt = now;
     client.nextProbeAt = now;
   }
 
   /**
-   * Remove a client and stop the loop if empty.
+   * Remove a client and stop the loop if there are none left.
    * @param {object} client
    */
   dropClient(client) {
@@ -232,7 +275,7 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Start the broadcast loop.
+   * Start the broadcast loop (fixed 100 ms tick).
    */
   startLoop() {
     if (this.interval) return;
@@ -249,7 +292,8 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Broadcast metrics to connected clients.
+   * Send metrics to clients whose cadence is due.
+   * Each client maintains its own scope/spectrum/probe timers.
    */
   broadcast() {
     if (!this.clients.size) return;
@@ -273,6 +317,7 @@ export class WebSocketMetricsServer {
         log_bins: cfg.log_bins,
       };
       try {
+        // Compute metrics only for the sections that are due.
         const payload = this.runtime.getAudioMetrics(opts);
         const frame = JSON.stringify({
           type: 'metrics',
@@ -282,6 +327,7 @@ export class WebSocketMetricsServer {
         });
         client.socket.write(this.encodeText(frame));
       } catch (err) {
+        // Any runtime errors are reported as a structured error frame.
         const frame = JSON.stringify({
           type: 'error',
           timestamp_ms: now,
@@ -290,19 +336,22 @@ export class WebSocketMetricsServer {
         client.socket.write(this.encodeText(frame));
       }
       if (dueScope && cfg.scope_fps > 0) {
+        // Schedule next time this client should receive scope data.
         client.nextScopeAt = now + Math.round(1000 / cfg.scope_fps);
       }
       if (dueSpectrum && cfg.spectrum_fps > 0) {
+        // Schedule next time this client should receive spectrum data.
         client.nextSpectrumAt = now + Math.round(1000 / cfg.spectrum_fps);
       }
       if (dueProbe && cfg.probe_fps > 0) {
+        // Schedule next time this client should receive probe data.
         client.nextProbeAt = now + Math.round(1000 / cfg.probe_fps);
       }
     }
   }
 
   /**
-   * Build a WebSocket accept key.
+   * Build Sec-WebSocket-Accept (RFC6455).
    * @param {string} key
    * @returns {string}
    */
@@ -311,7 +360,8 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Encode a websocket frame.
+   * Encode an unmasked WebSocket frame (server -> client).
+   * Handles <126, 16-bit (126), and 64-bit (127) lengths.
    * @param {number} opcode
    * @param {Buffer} payload
    * @returns {Buffer}
@@ -337,7 +387,7 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Encode a websocket text frame.
+   * Encode a text frame from a UTF-8 string.
    * @param {string} data
    * @returns {Buffer}
    */
@@ -346,7 +396,9 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Decode incoming websocket frames.
+   * Decode incoming frames (client -> server).
+   * - Supports masked frames (required from clients).
+   * - Returns complete frames and remaining buffer.
    * @param {Buffer} buffer
    * @returns {{frames: Array<{opcode: number, payload: Buffer}>, remaining: Buffer}}
    */
@@ -377,6 +429,7 @@ export class WebSocketMetricsServer {
       let payload = buffer.slice(offset + headerLength + maskLength, offset + frameLength);
       if (masked) {
         const mask = buffer.slice(offset + headerLength, offset + headerLength + 4);
+        // Client payloads are masked; unmask by XOR with the 4-byte mask.
         payload = Buffer.from(payload.map((byte, idx) => byte ^ mask[idx % 4]));
       }
       frames.push({ opcode, payload });
@@ -386,7 +439,7 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Normalize boolean values in a subscription.
+   * Normalize a boolean value from query string or JSON.
    * @param {unknown} value
    * @param {boolean} fallback
    * @returns {boolean}
@@ -399,7 +452,7 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Clamp numeric values for subscriptions.
+   * Convert to number and clamp a value (fps, fft, etc.).
    * @param {number} value
    * @param {number} min
    * @param {number} max
@@ -413,7 +466,8 @@ export class WebSocketMetricsServer {
   }
 
   /**
-   * Normalize WebSocket subscription parameters.
+   * Normalize subscription parameters (query string or JSON).
+   * Applies clamps to keep CPU usage predictable.
    * @param {object} params
    * @returns {object}
    */
@@ -424,6 +478,7 @@ export class WebSocketMetricsServer {
       const parsed = Number(probeValue);
       probeId = Number.isFinite(parsed) ? parsed : null;
     }
+    // Clamp each field to keep downstream analyzers stable and cheap.
     return {
       include_scope: this.parseBool(params.include_scope, this.defaults.include_scope),
       include_spectrum: this.parseBool(params.include_spectrum, this.defaults.include_spectrum),
