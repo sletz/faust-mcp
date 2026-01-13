@@ -554,7 +554,11 @@ class RtBrowserUiApp {
     const statusNode = statusEl || this.loader.status;
     if (statusNode) statusNode.textContent = 'Unlocking audio...';
     try {
-      await this.runtime.start();
+      if (typeof this.runtime.unlock_audio === 'function') {
+        await this.runtime.unlock_audio();
+      } else {
+        await this.runtime.start();
+      }
       await this.updateStatusFromRuntime();
       this.setStatus('Audio unlocked.');
       if (statusNode) statusNode.textContent = 'Audio unlocked.';
@@ -1342,6 +1346,7 @@ class RtBrowserUiApp {
           'input_file',
           'hide_meters',
         ],
+        unlock_audio: ['latency_hint'],
         save_wasm_module: [],
         get_param: ['path'],
         set_param: ['path', 'value'],

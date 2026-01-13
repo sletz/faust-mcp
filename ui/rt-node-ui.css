@@ -190,6 +190,13 @@ body {
   position: relative;
   cursor: col-resize;
   touch-action: none;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 45%,
+    rgba(255, 255, 255, 0.12) 55%,
+    transparent 100%
+  );
 }
 
 .column-splitter::before,
@@ -198,25 +205,38 @@ body {
   position: absolute;
   top: 28px;
   bottom: 28px;
-  width: 2px;
+  width: 3px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
 }
 
 .column-splitter::before {
-  left: calc(50% - 4px);
+  left: calc(50% - 5px);
 }
 
 .column-splitter::after {
-  left: calc(50% + 4px);
+  left: calc(50% + 5px);
 }
 
 .column-splitter:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.2) 45%,
+    rgba(255, 255, 255, 0.2) 55%,
+    transparent 100%
+  );
 }
 
 .column-splitter:active {
-  background: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.28) 45%,
+    rgba(255, 255, 255, 0.28) 55%,
+    transparent 100%
+  );
 }
 
 .right-column {

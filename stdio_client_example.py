@@ -114,6 +114,10 @@ async def main(
                         effect_dsp_json = f.read()
                     args["effect_wasm_base64"] = effect_wasm_base64
                     args["effect_dsp_json"] = effect_dsp_json
+            elif tool == "unlock_audio":
+                args = {}
+                if latency_hint:
+                    args["latency_hint"] = latency_hint
             elif tool in ("get_params", "get_dsp_json", "save_wasm_module", "get_audio_metrics", "stop"):
                 args = {}
             else:
@@ -134,7 +138,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, get_audio_metrics, set_param_values, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, unlock_audio, get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, get_audio_metrics, set_param_values, set_param, stop).",
     )
     parser.add_argument(
         "--wasm",

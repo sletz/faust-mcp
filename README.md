@@ -510,7 +510,7 @@ Add a new MCP server entry in Claude Desktop’s config (stdio transport):
 
 Then:
 
-1) Open `http://127.0.0.1:8010/` in a browser and click **Unlock Audio**.  
+1) Open `http://127.0.0.1:8010/` in a browser and click **Unlock Audio** (or call `unlock_audio` from an MCP client in a user gesture).
 2) In Claude, choose the `faust-browser` server and call tools.
 
 ### Claude Desktop setup (both faust-node + faust-browser)
@@ -554,6 +554,7 @@ If you want both runtimes available, add two entries:
 - `compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)`
 - `compile(faust_code, name?, input_source?, input_freq?, input_file?, hide_meters?)`
 - `start()`
+- `unlock_audio(latency_hint?)` (browser-only)
 - `check_syntax(faust_code, name?)`
 - `get_status()`
 - `get_params()`

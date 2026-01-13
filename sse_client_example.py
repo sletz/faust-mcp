@@ -112,6 +112,10 @@ async def main(
                 if not param_path or param_value is None:
                     raise ValueError("--param-path and --param-value are required for set_param")
                 args = {"path": param_path, "value": param_value}
+            elif tool == "unlock_audio":
+                args = {}
+                if latency_hint:
+                    args["latency_hint"] = latency_hint
             elif tool in (
                 "get_params",
                 "get_dsp_json",
@@ -174,7 +178,7 @@ if __name__ == "__main__":
             "Tool name (compile_and_analyze, compile_and_start, compile, check_syntax, "
             "get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, "
             "get_audio_metrics, get_midi_inputs, get_midi_status, select_midi_input, "
-            "set_param_values, set_param, start, stop)."
+            "set_param_values, set_param, unlock_audio, start, stop)."
         ),
     )
     parser.add_argument(

@@ -677,8 +677,10 @@ export function createBrowserRuntime(options = {}) {
   /**
    * Reset in-memory runtime state and analyser caches.
    */
-  function resetState() {
-    state.audio_context = null;
+  function resetState({ keepAudioContext = false } = {}) {
+    if (!keepAudioContext) {
+      state.audio_context = null;
+    }
     state.faust_node = null;
     state.dsp_json = null;
     state.params = [];
@@ -773,11 +775,11 @@ export function createBrowserRuntime(options = {}) {
    * @returns {Promise<void>}
    */
   async function prepareForNewGraph() {
-    if (state.audio_context) {
+    if (state.faust_node) {
       await stop();
-    } else {
-      resetState();
+      return;
     }
+    resetState({ keepAudioContext: !!state.audio_context });
   }
 
   /**
@@ -791,7 +793,9 @@ export function createBrowserRuntime(options = {}) {
     if (!AudioContextClass) {
       throw new ToolError('audio_context_missing', 'WebAudio is not available');
     }
-    state.audio_context = new AudioContextClass({ latencyHint: hint });
+    if (!state.audio_context || state.audio_context.state === 'closed') {
+      state.audio_context = new AudioContextClass({ latencyHint: hint });
+    }
     return hint;
   }
 
@@ -1060,6 +1064,21 @@ export function createBrowserRuntime(options = {}) {
     }
     state.started = true;
     return withSchema({ status: 'started', name: state.name });
+  }
+
+  /**
+   * Unlock the AudioContext without requiring a running DSP.
+   */
+  async function unlock_audio(latency_hint = config.latency_hint) {
+    const hint = initAudioContext(latency_hint);
+    if (state.audio_context?.state === 'suspended') {
+      await state.audio_context.resume();
+    }
+    return withSchema({
+      status: 'unlocked',
+      latency_hint: hint,
+      audio_state: state.audio_context?.state || 'unknown',
+    });
   }
 
   /**
@@ -1421,6 +1440,7 @@ export function createBrowserRuntime(options = {}) {
     compile_and_start,
     load_wasm_module,
     start,
+    unlock_audio,
     stop,
     get_status,
     get_dsp_json,

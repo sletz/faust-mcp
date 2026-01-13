@@ -32,11 +32,12 @@ Runtime notes:
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+import errno
 import json
 import os
 import subprocess
-import threading
 import sys
+import threading
 
 
 MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
@@ -375,4 +376,14 @@ if __name__ == "__main__":
     transport = os.environ.get("MCP_TRANSPORT", "sse")
     mount_path = os.environ.get("MCP_MOUNT_PATH")
     print(f"Faust realtime MCP server starting (transport={transport})")
-    mcp.run(transport=transport, mount_path=mount_path)
+    try:
+        mcp.run(transport=transport, mount_path=mount_path)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(
+                f"ERROR: MCP port {MCP_PORT} is already in use. "
+                "Stop the other server or set MCP_PORT.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise

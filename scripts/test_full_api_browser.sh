@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end sanity check for the browser-only runtime via MCP SSE.
-# Requires a browser tab open to the UI and audio unlocked.
+# Requires a browser tab open to the UI and audio unlocked (user gesture).
 set -euo pipefail
 
 URL="${MCP_URL:-http://127.0.0.1:8000/sse}"
@@ -20,7 +20,7 @@ else
 fi
 
 if [[ "${REQUIRE_UNLOCK}" == "1" ]]; then
-  echo "Open ${UI_HTTP_BASE} and click Unlock Audio (or Compile & Start) before continuing."
+  echo "Open ${UI_HTTP_BASE} and click Unlock Audio (or trigger unlock_audio) before continuing."
   if [ -t 0 ]; then
     read -r -p "Press Enter to continue..."
   fi
@@ -28,6 +28,9 @@ fi
 
 echo "== check_syntax =="
 python3 sse_client_example.py --url "${URL}" --tool check_syntax --dsp "${DSP}" --name "${NAME}"
+
+echo "== unlock_audio =="
+python3 sse_client_example.py --url "${URL}" --tool unlock_audio --latency interactive
 
 echo "== compile_and_start =="
 python3 sse_client_example.py --url "${URL}" --tool compile_and_start --dsp "${DSP}" --name "${NAME}" --latency interactive

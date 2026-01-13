@@ -21,7 +21,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-save-wasm rt-load-wasm rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-node test-node-api test-browser-api
+.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-status rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-save-wasm rt-load-wasm rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-node test-node-api test-browser-api
 
 help:
 	@printf "Targets:\n"
@@ -52,6 +52,7 @@ help:
 	@printf "\n"
 	@printf "Real-time tools:\n"
 	@printf "  rt-compile    Compile/start DSP on real-time server\n"
+	@printf "  rt-get-status Get status from real-time server\n"
 	@printf "  rt-get-params Get params from real-time server\n"
 	@printf "  rt-get-param  Get a param value from real-time server\n"
 	@printf "  rt-get-param-values Get all param values from real-time server\n"
@@ -190,6 +191,9 @@ rt-compile:
 		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
 		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),) \
 		$(if $(filter 1 true yes,$(HIDE_METERS)),--hide-meters,)
+
+rt-get-status:
+	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_status
 
 rt-get-params:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool get_params

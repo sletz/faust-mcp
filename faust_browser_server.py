@@ -17,8 +17,10 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from functools import partial
 import argparse
+import errno
 import json
 import os
+import sys
 import threading
 import time
 import uuid
@@ -197,6 +199,13 @@ def compile(
 def start() -> str:
     """Start audio on the browser runtime."""
     result = _call_bridge("start")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def unlock_audio(latency_hint: str = "interactive") -> str:
+    """Unlock the AudioContext on the browser runtime."""
+    result = _call_bridge("unlock_audio", {"latency_hint": latency_hint})
     return json.dumps(result, indent=2)
 
 
@@ -448,7 +457,15 @@ def start_static_server(
 ) -> ThreadingHTTPServer:
     """Start the static HTTP server in a background thread."""
     handler = _make_handler(ui_index, root, ui_root)
-    httpd = ThreadingHTTPServer((host, port), handler)
+    try:
+        httpd = ThreadingHTTPServer((host, port), handler)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            raise RuntimeError(
+                f"Static UI port {port} is already in use. "
+                "Stop the other server or set BROWSER_UI_PORT/--static-port."
+            ) from exc
+        raise
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     return httpd
@@ -480,13 +497,17 @@ def main() -> None:
         ui_root = args.static_root
         if os.path.isdir(os.path.join(args.static_root, "ui", "node_modules")):
             ui_root = os.path.join(args.static_root, "ui")
-        start_static_server(
-            host=args.static_host,
-            port=args.static_port,
-            root=args.static_root,
-            ui_index=args.static_index,
-            ui_root=ui_root,
-        )
+        try:
+            start_static_server(
+                host=args.static_host,
+                port=args.static_port,
+                root=args.static_root,
+                ui_index=args.static_index,
+                ui_root=ui_root,
+            )
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
         print(
             "Browser UI server running at "
             f"http://{args.static_host}:{args.static_port}/"
