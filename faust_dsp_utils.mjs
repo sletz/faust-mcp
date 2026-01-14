@@ -100,10 +100,10 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
             'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
           ]
           : [
-            'process = mcp_dsp.process <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+            'process = mcp_dsp.process <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
             'effect = mcp_dsp.effect;',
           ]
-        : ['process = mcp_dsp.process <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
+        : ['process = mcp_dsp.process <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: false };
@@ -149,10 +149,10 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
               'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
             ]
             : [
-              'process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+              'process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
               'effect = mcp_dsp.effect;',
             ]
-          : ['process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
+          : ['process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
       ].join('\n');
 
       return { code: wrappedCode, useExternalInput: false };
@@ -174,10 +174,10 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
             'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
           ]
           : [
-            'process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+            'process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
             'effect = mcp_dsp.effect;',
           ]
-        : ['process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
+        : ['process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: true, inputFile };
@@ -211,10 +211,10 @@ export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideM
           'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
         ]
         : [
-          'process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);',
+          'process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
           'effect = mcp_dsp.effect;',
         ]
-      : ['process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters(mcp_dsp.process);']),
+      : ['process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
