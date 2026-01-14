@@ -697,6 +697,9 @@ python3 stdio_client_example.py --server faust_node_server.py \
 ```
 
 For the real-time server (faustwasm), soundfiles must be served over HTTP/HTTPS.
+For the browser runtime, you can load soundfiles either via an HTTP/HTTPS URL
+(Faust `soundfile()` path) or via a relative path that resolves against the UI
+origin (WebAudio `fetch` + `decodeAudioData` path).
 To test local files, start a simple server in the repo root:
 
 ```bash
@@ -841,6 +844,18 @@ Local file server for soundfile inputs:
 
 ```bash
 python3 -m http.server 9000
+```
+
+Browser runtime soundfile inputs (two ways):
+
+```bash
+make run-browser-ui
+
+# 1) HTTP/HTTPS URL (Faust soundfile() path).
+make rt-compile DSP=t1.dsp INPUT_SOURCE=file INPUT_FILE=http://127.0.0.1:8010/tests/assets/tango.wav
+
+# 2) Relative path (resolved against the UI origin, uses WebAudio fetch/decode).
+make rt-compile DSP=t1.dsp INPUT_SOURCE=file INPUT_FILE=tests/assets/tango.wav
 ```
 
 Offline analysis with a sine test input (DawDreamer):

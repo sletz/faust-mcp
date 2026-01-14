@@ -13,6 +13,7 @@ INPUT_SOURCE ?=
 INPUT_FREQ ?=
 INPUT_FILE ?=
 HIDE_METERS ?= 0
+WRAPPED_OUT ?=
 RT_MIDI_INDEX ?= 0
 DD_SAMPLE_RATE ?= 44100
 DD_BLOCK_SIZE ?= 256
@@ -21,7 +22,7 @@ DD_FFT_SIZE ?= 2048
 DD_FFT_HOP ?= 1024
 DD_ROLLOFF ?= 0.85
 
-.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw rt-compile rt-get-status rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-save-wasm rt-load-wasm rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-node test-node-api test-browser-api
+.PHONY: help setup setup-node setup-ui setup-browser-ui setup-midi clean smoke-test run-sse run-stdio run-daw run-node run-node-ui run-node-stdio run-node-stdio-ui run-node-stdio-session run-browser-ui run-browser-stdio run-browser-static client-sse client-stdio client-daw emit-wrapped-dsp rt-compile rt-get-status rt-get-params rt-get-param rt-get-param-values rt-get-audio-metrics rt-get-audio-metrics-scope rt-get-audio-metrics-spectrum rt-get-audio-metrics-full rt-get-audio-metrics-full-per-channel rt-set-param rt-save-wasm rt-load-wasm rt-stop rt-midi-list rt-midi-select rt-ws-metrics stop-node test-node-api test-browser-api
 
 help:
 	@printf "Targets:\n"
@@ -51,6 +52,7 @@ help:
 	@printf "  client-daw   Call the DawDreamer server using t1.dsp\n"
 	@printf "\n"
 	@printf "Real-time tools:\n"
+	@printf "  emit-wrapped-dsp Emit the wrapped DSP code locally\n"
 	@printf "  rt-compile    Compile/start DSP on real-time server\n"
 	@printf "  rt-get-status Get status from real-time server\n"
 	@printf "  rt-get-params Get params from real-time server\n"
@@ -90,6 +92,7 @@ help:
 	@printf "  INPUT_FREQ=%s\n" "$(INPUT_FREQ)"
 	@printf "  INPUT_FILE=%s\n" "$(INPUT_FILE)"
 	@printf "  HIDE_METERS=%s\n" "$(HIDE_METERS)"
+	@printf "  WRAPPED_OUT=%s\n" "$(WRAPPED_OUT)"
 	@printf "  RT_MIDI_INDEX=%s\n" "$(RT_MIDI_INDEX)"
 
 setup:
@@ -184,6 +187,14 @@ test-node-api:
 
 test-browser-api:
 	./scripts/test_full_api_browser.sh
+
+emit-wrapped-dsp:
+	node scripts/emit_wrapped_dsp.mjs --dsp $(DSP) \
+		$(if $(INPUT_SOURCE),--input-source $(INPUT_SOURCE),) \
+		$(if $(INPUT_FREQ),--input-freq $(INPUT_FREQ),) \
+		$(if $(INPUT_FILE),--input-file $(INPUT_FILE),) \
+		$(if $(filter 1 true yes,$(HIDE_METERS)),--hide-meters,) \
+		$(if $(WRAPPED_OUT),--out $(WRAPPED_OUT),)
 
 rt-compile:
 	$(PYTHON) sse_client_example.py --url http://$(MCP_HOST):$(MCP_PORT)/sse --tool compile_and_start --dsp $(DSP) --name $(RT_NAME) --latency interactive \

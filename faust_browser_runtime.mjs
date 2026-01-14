@@ -652,6 +652,9 @@ export function createBrowserRuntime(options = {}) {
     wasm_effect_factory: null,
     svg_diagrams: null,
     svg_key: null,
+    file_source_node: null,
+    file_source_node_started: false,
+    file_source_url: null,
   };
 
   midiManager.runtime = state;
@@ -695,6 +698,9 @@ export function createBrowserRuntime(options = {}) {
     state.wasm_effect_factory = null;
     state.svg_diagrams = null;
     state.svg_key = null;
+    state.file_source_node = null;
+    state.file_source_node_started = false;
+    state.file_source_url = null;
     metricsCollector.reset();
     metricsCollector.setMeterCaches({
       outputParamsCache: state.output_params_cache,
@@ -961,14 +967,6 @@ export function createBrowserRuntime(options = {}) {
     } catch (err) {
       throw new ToolError('wrap_failed', err instanceof Error ? err.message : String(err));
     }
-    if (wrapped.useExternalInput) {
-      throw new ToolError(
-        'input_file_unsupported',
-        'Local file inputs are not supported in the browser runtime.',
-        { input_file },
-      );
-    }
-
     const compiledMono = await monoGenerator.compile(
       compilerManager.compiler,
       name,
@@ -1026,6 +1024,35 @@ export function createBrowserRuntime(options = {}) {
     }
 
     attachParamHandlers();
+
+    if (wrapped.useExternalInput && wrapped.inputFile) {
+      const inputUrl = toAbsoluteUrl(wrapped.inputFile);
+      try {
+        const response = await fetch(inputUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await state.audio_context.decodeAudioData(arrayBuffer);
+
+        const source = state.audio_context.createBufferSource();
+        source.buffer = audioBuffer;
+        source.loop = true;
+        source.connect(state.faust_node);
+
+        state.file_source_node = source;
+        state.file_source_node_started = false;
+        state.file_source_url = inputUrl;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new ToolError(
+          'input_file_error',
+          `Failed to load audio file: ${message}`,
+          { input_file: wrapped.inputFile },
+        );
+      }
+    }
+
     tryStartNode();
 
     state.dsp_code = dsp_code;
@@ -1057,6 +1084,12 @@ export function createBrowserRuntime(options = {}) {
       });
       await Promise.race([resumePromise, timeoutPromise]);
     }
+    if (state.file_source_node && !state.file_source_node_started) {
+      try {
+        state.file_source_node.start();
+      } catch (_) {}
+      state.file_source_node_started = true;
+    }
     if (typeof state.faust_node?.start === 'function') {
       try {
         state.faust_node.start();
@@ -1085,6 +1118,14 @@ export function createBrowserRuntime(options = {}) {
    * Stop audio and reset runtime state.
    */
   async function stop() {
+    if (state.file_source_node) {
+      try {
+        state.file_source_node.stop();
+      } catch (_) {}
+      try {
+        state.file_source_node.disconnect();
+      } catch (_) {}
+    }
     if (state.faust_node) {
       try {
         state.faust_node.stop();
