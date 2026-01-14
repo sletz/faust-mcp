@@ -2,7 +2,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { wrapTestInputs } from '../faust_dsp_utils.mjs';
+import { wrapDSPCode } from '../faust_dsp_utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -101,7 +101,7 @@ async function main() {
   // Resolve and read the input DSP, then apply the standard MCP wrapper.
   const dspPath = path.resolve(__dirname, '..', args.dsp);
   const dspCode = await fs.readFile(dspPath, 'utf-8');
-  const wrapped = wrapTestInputs(
+  const wrapped = wrapDSPCode(
     dspCode,
     args.inputSource,
     args.inputFreq,

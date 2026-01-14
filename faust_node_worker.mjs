@@ -24,7 +24,7 @@ import {
   extractBargraphUnits,
   extractMidiAndNvoices,
   extractParamsFromJson,
-  wrapTestInputs,
+  wrapDSPCode,
 } from './faust_dsp_utils.mjs';
 import {
   applyAnalyserConfig,
@@ -626,7 +626,7 @@ class WorkerRuntime {
     const hint = this.initAudioContext(latency_hint);
 
     const monoGenerator = this.compilerManager.createGenerator();
-    const wrapped = wrapTestInputs(
+    const wrapped = wrapDSPCode(
       dsp_code,
       input_source,
       input_freq,

@@ -186,7 +186,7 @@ File updated: `faust_node_worker.mjs`
 Goal: move DSP wrapping and Faust JSON parsing helpers into a shared module.
 
 Changes:
-- Added `faust_dsp_utils.mjs` with `wrapTestInputs`, `extractParamsFromJson`,
+- Added `faust_dsp_utils.mjs` with `wrapDSPCode`, `extractParamsFromJson`,
   `extractBargraphUnits`, and `extractBargraphProbes`.
 - Removed the helper implementations from `faust_node_worker.mjs` and
   replaced them with imports.

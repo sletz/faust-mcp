@@ -12,7 +12,7 @@ import {
   extractBargraphUnits,
   extractMidiAndNvoices,
   extractParamsFromJson,
-  wrapTestInputs,
+  wrapDSPCode,
 } from './faust_dsp_utils.mjs';
 import {
   applyAnalyserConfig,
@@ -957,7 +957,7 @@ export function createBrowserRuntime(options = {}) {
     const monoGenerator = compilerManager.createGenerator();
     let wrapped = null;
     try {
-      wrapped = wrapTestInputs(
+      wrapped = wrapDSPCode(
         dsp_code,
         input_source,
         input_freq,

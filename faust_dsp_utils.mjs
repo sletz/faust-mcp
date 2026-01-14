@@ -11,7 +11,7 @@
  * @param {boolean} hideMeters
  * @returns {{code: string, useExternalInput: boolean, inputFile?: string}}
  */
-export function wrapTestInputs(dspCode, inputSource, inputFreq, inputFile, hideMeters) {
+export function wrapDSPCode(dspCode, inputSource, inputFreq, inputFile, hideMeters) {
   const source = (inputSource || 'none').trim().toLowerCase();
   const hiddenTag = hideMeters ? '[hidden:1]' : '';
   const rawCode = String(dspCode);
