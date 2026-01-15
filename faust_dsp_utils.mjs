@@ -36,7 +36,9 @@ export function wrapDSPCode(dspCode, inputSource, inputFreq, inputFile, hideMete
         `mcp_in_peak(i) = _ <: (_, (an.peak_envelope(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[0]Peak/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
         `mcp_in_rms(i) = _ <: (_, (an.rms_envelope_rect(0.1) : mcp_lin2db : hbargraph("v:[0]Input Meters/[1]RMS/ch%2i${hiddenTag}[unit:dB]", -60, 0))) : attach;`,
         'mcp_in_meter(i) = mcp_in_peak(i) : mcp_in_rms(i);',
-        'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i)) : FX;',
+        'mcp_input_meters(FX) = par(i, inputs(FX), mcp_in_meter(i));',
+        '// Chain with input metering',
+        'mcp_input_chain(FX) = mcp_input_meters(FX) : FX;',
       );
     }
     defs.push(
@@ -72,6 +74,8 @@ export function wrapDSPCode(dspCode, inputSource, inputFreq, inputFile, hideMete
       'mcp_output_meters(FX) = mcp_output_meters_nomix(FX), (mcp_out_mix_signal(FX) : mcp_out_mix_meter);',
       '// Per-channel meters + mix meters (tap) with unchanged output count.',
       'mcp_output_meters_tap(FX) = mcp_out_mix_tap(FX) : mcp_output_meters_nomix(FX);',
+      '// Final processing chain with output metering tap',
+      'mcp_chain(FX) = mcp_input_chain(FX) <: mcp_dsp.mcp_output_meters_tap(FX);',
       '',
     );
     return defs;
@@ -145,14 +149,14 @@ export function wrapDSPCode(dspCode, inputSource, inputFreq, inputFile, hideMete
         ...(hasEffect
           ? useEffectMeters
             ? [
-              'process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process);',
+              'process = mcp_play <: mcp_dsp.mcp_input_chain(mcp_dsp.process);',
               'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
             ]
             : [
-              'process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
+              'process = mcp_play <: mcp_dsp.mcp_chain(mcp_dsp.process);',
               'effect = mcp_dsp.effect;',
             ]
-          : ['process = mcp_play <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
+          : ['process = mcp_play <: mcp_dsp.mcp_chain(mcp_dsp.process);']),
       ].join('\n');
 
       return { code: wrappedCode, useExternalInput: false };
@@ -170,14 +174,14 @@ export function wrapDSPCode(dspCode, inputSource, inputFreq, inputFile, hideMete
       ...(hasEffect
         ? useEffectMeters
           ? [
-            'process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process);',
+            'process = mcp_dsp.mcp_input_chain(mcp_dsp.process);',
             'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
           ]
-          : [
-            'process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
+          : [       
+            'process = mcp_dsp.mcp_chain(mcp_dsp.process);',
             'effect = mcp_dsp.effect;',
           ]
-        : ['process = _ <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
+        : ['process = mcp_dsp.mcp_chain(mcp_dsp.process);']),
     ].join('\n');
 
     return { code: wrappedCode, useExternalInput: true, inputFile };
@@ -207,14 +211,14 @@ export function wrapDSPCode(dspCode, inputSource, inputFreq, inputFile, hideMete
     ...(hasEffect
       ? useEffectMeters
         ? [
-          'process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process);',
+          'process = mcp_input <: mcp_dsp.mcp_input_chain(mcp_dsp.process);',
           'effect = mcp_dsp.effect <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.effect);',
         ]
         : [
-          'process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);',
+          'process = mcp_input <: mcp_dsp.mcp_chain(mcp_dsp.process);',
           'effect = mcp_dsp.effect;',
         ]
-      : ['process = mcp_input <: mcp_dsp.mcp_input_meters(mcp_dsp.process) <: mcp_dsp.mcp_output_meters_tap(mcp_dsp.process);']),
+      : ['process = mcp_input <: mcp_dsp.mcp_chain(mcp_dsp.process);']),
   ].join('\n');
 
   return { code: wrappedCode, useExternalInput: false };
