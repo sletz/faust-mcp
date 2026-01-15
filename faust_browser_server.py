@@ -14,7 +14,11 @@ Runtime model:
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import (
+    BaseHTTPRequestHandler,
+    SimpleHTTPRequestHandler,
+    ThreadingHTTPServer,
+)
 from functools import partial
 import argparse
 import errno
@@ -93,7 +97,9 @@ class BrowserBridge:
             queue.clear()
             return items
 
-    def reply(self, req_id: int, result: dict | None = None, error: dict | None = None) -> None:
+    def reply(
+        self, req_id: int, result: dict | None = None, error: dict | None = None
+    ) -> None:
         """Store a browser reply and wake any waiting MCP request."""
         with self._lock:
             payload = {"id": req_id}
@@ -107,7 +113,10 @@ class BrowserBridge:
     def request(self, method: str, params: dict | None = None) -> dict:
         """Enqueue a request to the active browser session and await reply."""
         with self._lock:
-            if not self._active_session_id or self._active_session_id not in self._sessions:
+            if (
+                not self._active_session_id
+                or self._active_session_id not in self._sessions
+            ):
                 raise RuntimeError("No browser session connected")  # noqa: TRY003
             req_id = self._next_id
             self._next_id += 1
@@ -349,6 +358,7 @@ def select_midi_input(index: int | None = None, name: str | None = None) -> str:
 
 def _make_handler(ui_index: str, directory: str, ui_root: str):
     """Create the static HTTP handler with bridge endpoints and path routing."""
+
     class BrowserUiHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=directory, **kwargs)
@@ -356,23 +366,29 @@ def _make_handler(ui_index: str, directory: str, ui_root: str):
         def translate_path(self, path: str) -> str:
             """Map request paths to filesystem locations."""
             if path.startswith("/node_modules/"):
-                rel = path[len("/node_modules/"):]
+                rel = path[len("/node_modules/") :]
                 rel = rel.split("?", 1)[0].split("#", 1)[0]
                 rel = posixpath.normpath(rel).lstrip("/")
                 ui_node_modules = os.path.join(ui_root, "node_modules")
                 return os.path.join(ui_node_modules, rel)
             if path.startswith("/faust-ui/"):
-                rel = path[len("/faust-ui/"):]
+                rel = path[len("/faust-ui/") :]
                 rel = rel.split("?", 1)[0].split("#", 1)[0]
                 rel = posixpath.normpath(rel).lstrip("/")
-                ui_faust_root = os.path.join(ui_root, "node_modules", "@shren", "faust-ui", "dist", "esm")
+                ui_faust_root = os.path.join(
+                    ui_root, "node_modules", "@shren", "faust-ui", "dist", "esm"
+                )
                 return os.path.join(ui_faust_root, rel)
             if path.startswith("/assets/"):
-                rel = path[len("/assets/"):]
+                rel = path[len("/assets/") :]
                 rel = rel.split("?", 1)[0].split("#", 1)[0]
                 rel = posixpath.normpath(rel).lstrip("/")
                 return os.path.join(ui_root, "assets", rel)
-            if path in ("/rt-browser-ui.js", "/rt-browser-ui.css", "/rt-browser-ui.html"):
+            if path in (
+                "/rt-browser-ui.js",
+                "/rt-browser-ui.css",
+                "/rt-browser-ui.html",
+            ):
                 rel = path.lstrip("/")
                 return os.path.join(ui_root, rel)
             return super().translate_path(path)
@@ -430,7 +446,9 @@ def _make_handler(ui_index: str, directory: str, ui_root: str):
                 if req_id is None:
                     self._send_json({"error": "missing id"}, status=400)
                     return
-                bridge.reply(req_id, result=payload.get("result"), error=payload.get("error"))
+                bridge.reply(
+                    req_id, result=payload.get("result"), error=payload.get("error")
+                )
                 self._send_json({"status": "ok"})
                 return
 
@@ -495,7 +513,7 @@ def main() -> None:
 
     if not args.no_static:
         ui_root = args.static_root
-        if os.path.isdir(os.path.join(args.static_root, "ui", "node_modules")):
+        if os.path.isdir(os.path.join(args.static_root, "ui")):
             ui_root = os.path.join(args.static_root, "ui")
         try:
             start_static_server(

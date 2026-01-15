@@ -451,7 +451,7 @@ exposes MCP tools over SSE/stdio via a long-polling bridge.
 ### Setup
 
 ```bash
-make setup-ui-browser
+make setup-browser-ui
 ```
 
 ### Run
