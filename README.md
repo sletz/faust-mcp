@@ -552,7 +552,7 @@ If you want both runtimes available, add two entries:
 ### Real-time tools
 
 - `compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)`
-- `compile(faust_code, name?, input_source?, input_freq?, input_file?, hide_meters?)`
+- `compile(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)`
 - `start()`
 - `unlock_audio(latency_hint?)` (browser-only)
 - `check_syntax(faust_code, name?)`
@@ -562,12 +562,15 @@ If you want both runtimes available, add two entries:
 - `get_param(path)`
 - `get_param_values()`
 - `get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)`
+- `save_wasm_module()`
+- `load_wasm_module(wasm_base64, dsp_json, effect_wasm_base64?, effect_dsp_json?, name?, latency_hint?)`
 - `get_midi_inputs()`
 - `get_midi_status()`
 - `select_midi_input(index?, name?)`
 - `set_param_values(values)`
 - `set_param(path, value)`
 - `stop()`
+
 
 `get_audio_metrics()` returns RMS/peak metering derived from bargraphs that are
 automatically injected by the real-time server when it wraps your Faust DSP
@@ -677,7 +680,8 @@ including the selected input (if any) and the most recent MIDI message.
 }
 ```
 
-`latency_hint` accepts `interactive` (default) or `playback`.
+`latency_hint` accepts `interactive` (default) or `playback` for `compile`,
+`compile_and_start`, `unlock_audio`, and `load_wasm_module`.
 `input_source` accepts `none` (default), `sine`, `noise`, or `file`. `input_freq`
 sets the sine frequency in Hz (default 1000). `input_file` sets the path for a
 soundfile input when `input_source=file`. `hide_meters` (default `false`) appends

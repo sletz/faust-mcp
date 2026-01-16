@@ -735,6 +735,7 @@ export function createBrowserRuntime(options = {}) {
   async function compile(
     faust_code,
     name = config.name,
+    latency_hint = config.latency_hint,
     input_source = config.input_source,
     input_freq = config.input_freq,
     input_file = config.input_file,
@@ -743,7 +744,7 @@ export function createBrowserRuntime(options = {}) {
     return compileDSP({
       dsp_code: faust_code,
       name,
-      latency_hint: config.latency_hint,
+      latency_hint,
       input_source,
       input_freq,
       input_file,

@@ -39,8 +39,8 @@ async def main(
         server_path: Python entrypoint for the MCP server.
         tmpdir: Optional TMPDIR override for the server process.
         tool: Tool name to invoke.
-        name: Optional DSP instance name for compile_and_start.
-        latency_hint: Optional latency hint for compile_and_start.
+        name: Optional DSP instance name for compile/compile_and_start.
+        latency_hint: Optional latency hint for compile/compile_and_start.
         input_source: Optional test input source (none, sine, noise, file).
         input_freq: Optional sine frequency in Hz.
         input_file: Optional audio file path for file test input.
@@ -59,11 +59,11 @@ async def main(
         async with ClientSession(read, write) as session:
             await session.initialize()
             args = None
-            if tool in ("compile_and_analyze", "compile_and_start", "check_syntax"):
+            if tool in ("compile_and_analyze", "compile_and_start", "check_syntax", "compile"):
                 with open(dsp_path, "r", encoding="utf-8") as f:
                     dsp = f.read()
                 args = {"faust_code": dsp}
-                if tool in ("compile_and_analyze", "compile_and_start"):
+                if tool in ("compile_and_analyze", "compile_and_start", "compile"):
                     if input_source is not None:
                         args["input_source"] = input_source
                     if input_freq is not None:
@@ -71,6 +71,13 @@ async def main(
                     if input_file is not None:
                         args["input_file"] = input_file
                 if tool == "compile_and_start":
+                    if name:
+                        args["name"] = name
+                    if latency_hint:
+                        args["latency_hint"] = latency_hint
+                    if hide_meters:
+                        args["hide_meters"] = True
+                elif tool == "compile":
                     if name:
                         args["name"] = name
                     if latency_hint:
@@ -138,7 +145,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tool",
         default="compile_and_analyze",
-        help="Tool name (compile_and_analyze, compile_and_start, check_syntax, unlock_audio, get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, get_audio_metrics, set_param_values, set_param, stop).",
+        help="Tool name (compile_and_analyze, compile_and_start, compile, check_syntax, unlock_audio, get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, get_audio_metrics, set_param_values, set_param, stop).",
     )
     parser.add_argument(
         "--wasm",
@@ -168,7 +175,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--latency",
         default=None,
-        help="Latency hint for compile_and_start (interactive or playback).",
+        help="Latency hint for compile/compile_and_start (interactive or playback).",
     )
     parser.add_argument(
         "--tmpdir",
@@ -178,7 +185,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--input-source",
         default=None,
-        help="Input source for compile_and_analyze/compile_and_start (none, sine, noise, file). DawDreamer/RT only.",
+        help="Input source for compile_and_analyze/compile_and_start/compile (none, sine, noise, file). DawDreamer/RT only.",
     )
     parser.add_argument(
         "--input-freq",

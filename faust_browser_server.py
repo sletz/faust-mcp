@@ -184,6 +184,7 @@ def compile_and_start(
 def compile(
     faust_code: str,
     name: str = "faust-browser",
+    latency_hint: str = "interactive",
     input_source: str = "none",
     input_freq: float | None = None,
     input_file: str | None = None,
@@ -195,6 +196,7 @@ def compile(
         {
             "dsp_code": faust_code,
             "name": name,
+            "latency_hint": latency_hint,
             "input_source": input_source,
             "input_freq": input_freq,
             "input_file": input_file,

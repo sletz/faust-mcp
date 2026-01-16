@@ -29,11 +29,16 @@ fi
 echo "== check_syntax =="
 python3 sse_client_example.py --url "${URL}" --tool check_syntax --dsp "${DSP}" --name "${NAME}"
 
-echo "== unlock_audio =="
+echo "== unlock_audio (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool unlock_audio --latency interactive
-
-echo "== compile_and_start =="
+echo "== compile_and_start (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool compile_and_start --dsp "${DSP}" --name "${NAME}" --latency interactive
+echo "== stop (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+echo "== unlock_audio (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool unlock_audio --latency playback
+echo "== compile_and_start (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool compile_and_start --dsp "${DSP}" --name "${NAME}" --latency playback
 
 echo "== get_params =="
 python3 sse_client_example.py --url "${URL}" --tool get_params
@@ -103,19 +108,32 @@ if data.get("effect_wasm_base64") and data.get("effect_dsp_json"):
         json.dump(data.get("effect_dsp_json"), f, indent=2)
 PY
 
-echo "== load_wasm_module =="
+echo "== load_wasm_module (interactive) =="
 extra_args=()
 if [[ -f "${TMPDIR}/effect.wasm" && -f "${TMPDIR}/effect.json" ]]; then
   extra_args=(--effect-wasm "${TMPDIR}/effect.wasm" --effect-dsp-json "${TMPDIR}/effect.json")
 fi
 if [ ${#extra_args[@]} -eq 0 ]; then
   python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
-    --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json"
+    --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" --latency interactive
 else
   python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
     --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
-    "${extra_args[@]}"
+    "${extra_args[@]}" --latency interactive
 fi
+echo "== stop (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+echo "== load_wasm_module (playback) =="
+if [ ${#extra_args[@]} -eq 0 ]; then
+  python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
+    --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" --latency playback
+else
+  python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
+    --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
+    "${extra_args[@]}" --latency playback
+fi
+echo "== stop (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
 
 echo "== get_param (gain) =="
 python3 sse_client_example.py --url "${URL}" --tool get_param --param-path "${GAIN_PATH}"
@@ -137,13 +155,17 @@ python3 sse_client_example.py --url "${URL}" --tool get_audio_metrics
 echo "== stop =="
 python3 sse_client_example.py --url "${URL}" --tool stop
 
-echo "== compile (no start) =="
-python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}"
-
-echo "== start =="
+echo "== compile (no start, interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}" --latency interactive
+echo "== start (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool start
-
-echo "== stop =="
+echo "== stop (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+echo "== compile (no start, playback) =="
+python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}" --latency playback
+echo "== start (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool start
+echo "== stop (playback) =="
 python3 sse_client_example.py --url "${URL}" --tool stop
 
 echo "OK"

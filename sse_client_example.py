@@ -73,6 +73,8 @@ async def main(
                 if tool == "compile":
                     if name:
                         args["name"] = name
+                    if latency_hint:
+                        args["latency_hint"] = latency_hint
                     if hide_meters:
                         args["hide_meters"] = True
                 elif tool == "check_syntax" and name:
@@ -204,17 +206,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--name",
         default=None,
-        help="DSP instance name for compile_and_start.",
+        help="DSP instance name for compile/compile_and_start.",
     )
     parser.add_argument(
         "--latency",
         default=None,
-        help="Latency hint for compile_and_start (interactive or playback).",
+        help="Latency hint for compile/compile_and_start (interactive or playback).",
     )
     parser.add_argument(
         "--input-source",
         default=None,
-        help="Input source for compile_and_analyze/compile_and_start (none, sine, noise, file). DawDreamer/RT servers only.",
+        help="Input source for compile_and_analyze/compile_and_start/compile (none, sine, noise, file). DawDreamer/RT servers only.",
     )
     parser.add_argument(
         "--input-freq",
