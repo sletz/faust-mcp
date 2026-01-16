@@ -111,6 +111,8 @@ else
     --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
     "${extra_args[@]}" --latency interactive
 fi
+echo "== start (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool start
 echo "== stop (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool stop
 echo "== load_wasm_module (playback) =="
@@ -122,20 +124,8 @@ else
     --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
     "${extra_args[@]}" --latency playback
 fi
-echo "== stop (playback) =="
-python3 sse_client_example.py --url "${URL}" --tool stop
-
-echo "== compile (no start, interactive) =="
-python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}" --latency interactive
-echo "== start (interactive) =="
-python3 sse_client_example.py --url "${URL}" --tool start
-echo "== stop (interactive) =="
-python3 sse_client_example.py --url "${URL}" --tool stop
-echo "== compile (no start, playback) =="
-python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}" --latency playback
 echo "== start (playback) =="
 python3 sse_client_example.py --url "${URL}" --tool start
-
 echo "== get_param (gain) =="
 python3 sse_client_example.py --url "${URL}" --tool get_param --param-path "${GAIN_PATH}"
 
@@ -156,6 +146,19 @@ python3 sse_client_example.py --url "${URL}" --tool get_audio_metrics
 echo "== get_audio_metrics (scope+spectrum, per-channel) =="
 python3 sse_client_example.py --url "${URL}" --tool get_audio_metrics \
   --include-scope --include-spectrum --per-channel --fft-size 2048 --smoothing 0.8 --min-db -90 --max-db 0 --edge-threshold 0.1 --log-bins 48
+echo "== stop (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+
+echo "== compile (no start, interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}" --latency interactive
+echo "== start (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool start
+echo "== stop (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+echo "== compile (no start, playback) =="
+python3 sse_client_example.py --url "${URL}" --tool compile --dsp "${DSP}" --name "${NAME}" --latency playback
+echo "== start (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool start
 
 # Optional UI endpoint checks (skip with SKIP_UI=1).
 if [[ "${SKIP_UI}" != "1" ]]; then

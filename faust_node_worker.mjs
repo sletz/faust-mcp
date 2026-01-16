@@ -539,6 +539,9 @@ class WorkerRuntime {
    * Start the Faust node if supported.
    */
   tryStartNode() {
+    if (!this.faustNode) {
+      return;
+    }
     try {
       this.faustNode.start();
     } catch (_) {}
@@ -550,6 +553,12 @@ class WorkerRuntime {
    * @returns {object}
    */
   resolveRuntimeJson({ fallback, allowFallback }) {
+    if (!this.faustNode) {
+      if (allowFallback) {
+        return fallback;
+      }
+      throw new Error('No running DSP. Call compile_and_start first.');
+    }
     try {
       const runtimeJson = this.faustNode.getJSON();
       if (runtimeJson) {
@@ -583,7 +592,9 @@ class WorkerRuntime {
       meterUnitsByPath: this.meterUnitsByPath,
       meterProbesByPath: this.meterProbesByPath,
     });
-    this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
+    if (this.audioContext && this.faustNode) {
+      this.metricsCollector.attach(this.audioContext, this.faustNode, this.faustJson);
+    }
 
     return this.buildRuntimeResponse({ hint, name });
   }
@@ -619,6 +630,7 @@ class WorkerRuntime {
     input_freq,
     input_file,
     hide_meters,
+    start_audio = true,
   }) {
     await this.compilerManager.ensureReady();
 
@@ -724,7 +736,9 @@ class WorkerRuntime {
       }
     }
 
-    this.tryStartNode();
+    if (start_audio) {
+      this.tryStartNode();
+    }
 
     return this.finalizeRuntimeState({
       hint,
@@ -760,7 +774,7 @@ class WorkerRuntime {
    * @returns {Promise<object>}
    */
   async compileAndStart(params) {
-    const compiled = await this.compileDSP(params);
+    const compiled = await this.compileDSP({ ...(params || {}), start_audio: false });
     await this.startDSP();
     return compiled;
   }
@@ -927,7 +941,6 @@ class WorkerRuntime {
     this.wasmEffectFactory = effectFactory;
 
     this.attachParamHandlers();
-    this.tryStartNode();
 
     return this.finalizeRuntimeState({
       hint,
@@ -1633,7 +1646,7 @@ class WorkerApp {
   buildHandlers() {
     return {
       check_syntax: (params) => this.compilerManager.checkSyntax(params || {}),
-      compile: (params) => this.runtime.compileDSP(params || {}),
+      compile: (params) => this.runtime.compileDSP({ ...(params || {}), start_audio: false }),
       start: () => this.runtime.startDSP(),
       compile_and_start: (params) => this.runtime.compileAndStart(params || {}),
       set_param: (params) => this.runtime.setParam(params || {}),

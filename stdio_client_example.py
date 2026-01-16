@@ -121,6 +121,8 @@ async def main(
                         effect_dsp_json = f.read()
                     args["effect_wasm_base64"] = effect_wasm_base64
                     args["effect_dsp_json"] = effect_dsp_json
+                if latency_hint:
+                    args["latency_hint"] = latency_hint
             elif tool == "unlock_audio":
                 args = {}
                 if latency_hint:

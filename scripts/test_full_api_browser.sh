@@ -121,6 +121,8 @@ else
     --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
     "${extra_args[@]}" --latency interactive
 fi
+echo "== start (interactive) =="
+python3 sse_client_example.py --url "${URL}" --tool start
 echo "== stop (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool stop
 echo "== load_wasm_module (playback) =="
@@ -132,9 +134,8 @@ else
     --wasm "${TMPDIR}/dsp.wasm" --dsp-json "${TMPDIR}/dsp.json" \
     "${extra_args[@]}" --latency playback
 fi
-echo "== stop (playback) =="
-python3 sse_client_example.py --url "${URL}" --tool stop
-
+echo "== start (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool start
 echo "== get_param (gain) =="
 python3 sse_client_example.py --url "${URL}" --tool get_param --param-path "${GAIN_PATH}"
 
@@ -151,6 +152,8 @@ python3 sse_client_example.py --url "${URL}" --tool get_param_values
 
 echo "== get_audio_metrics =="
 python3 sse_client_example.py --url "${URL}" --tool get_audio_metrics
+echo "== stop (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
 
 echo "== stop =="
 python3 sse_client_example.py --url "${URL}" --tool stop

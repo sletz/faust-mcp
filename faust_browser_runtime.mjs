@@ -749,6 +749,7 @@ export function createBrowserRuntime(options = {}) {
       input_freq,
       input_file,
       hide_meters,
+      start_audio: false,
     });
   }
 
@@ -772,6 +773,7 @@ export function createBrowserRuntime(options = {}) {
       input_freq,
       input_file,
       hide_meters,
+      start_audio: false,
     });
     await start();
     return compiled;
@@ -877,6 +879,12 @@ export function createBrowserRuntime(options = {}) {
    * @returns {object}
    */
   function resolveRuntimeJson({ fallback, allowFallback }) {
+    if (!state.faust_node) {
+      if (allowFallback) {
+        return fallback;
+      }
+      throw new Error('No running DSP. Call compile_and_start first.');
+    }
     try {
       const runtimeJson = state.faust_node.getJSON();
       if (runtimeJson) {
@@ -910,7 +918,9 @@ export function createBrowserRuntime(options = {}) {
       meterUnitsByPath: state.meter_units_by_path,
       meterProbesByPath: state.meter_probes_by_path,
     });
-    metricsCollector.attach(state.audio_context, state.faust_node, state.dsp_json);
+    if (state.audio_context && state.faust_node) {
+      metricsCollector.attach(state.audio_context, state.faust_node, state.dsp_json);
+    }
 
     state.status = 'compiled';
 
@@ -946,6 +956,7 @@ export function createBrowserRuntime(options = {}) {
     input_freq,
     input_file,
     hide_meters,
+    start_audio = true,
   }) {
     await compilerManager.ensureReady();
     if (!dsp_code) {
@@ -1054,7 +1065,9 @@ export function createBrowserRuntime(options = {}) {
       }
     }
 
-    tryStartNode();
+    if (start_audio) {
+      tryStartNode();
+    }
 
     state.dsp_code = dsp_code;
 
@@ -1293,7 +1306,6 @@ export function createBrowserRuntime(options = {}) {
     state.wasm_effect_factory = effectFactory;
 
     attachParamHandlers();
-    tryStartNode();
 
     return finalizeRuntimeState({
       hint,
