@@ -1405,6 +1405,8 @@ class RtBrowserUiApp {
       await this.updateStatusFromRuntime();
       this.setStatus('Running.');
     } else if (method === 'stop') {
+      this.setStatus('Stopped.');
+    } else if (method === 'destroy') {
       this.renderEmptyState();
       this.setStatus('Stopped.');
     }

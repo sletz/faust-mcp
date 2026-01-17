@@ -465,7 +465,7 @@ class WorkerRuntime {
    */
   async prepareForNewGraph() {
     if (this.audioContext) {
-      await this.stop();
+      await this.destroy();
     } else {
       this.resetState();
     }
@@ -636,6 +636,11 @@ class WorkerRuntime {
 
     await this.prepareForNewGraph();
     const hint = this.initAudioContext(latency_hint);
+    if (!start_audio && this.audioContext?.state == 'running' && typeof this.audioContext.suspend === 'function') {
+      try {
+        await this.audioContext.suspend();
+      } catch (_) {}
+    }
 
     const monoGenerator = this.compilerManager.createGenerator();
     const wrapped = wrapDSPCode(
@@ -754,6 +759,11 @@ class WorkerRuntime {
    */
   async startDSP() {
     this.ensureRunning();
+    if (this.audioContext?.state === 'suspended' && typeof this.audioContext.resume === 'function') {
+      try {
+        await this.audioContext.resume();
+      } catch (_) {}
+    }
     if (this.started) {
       return this.withSchema({ status: 'started', already_started: true });
     }
@@ -780,10 +790,24 @@ class WorkerRuntime {
   }
 
   /**
-   * Stop playback and reset the DSP state.
+   * Stop playback without clearing the DSP state.
    * @returns {Promise<object>}
    */
   async stop() {
+    if (this.audioContext && typeof this.audioContext.suspend === 'function') {
+      try {
+        await this.audioContext.suspend();
+      } catch (_) {}
+    }
+    this.started = false;
+    return this.withSchema({ status: 'stopped' });
+  }
+
+  /**
+   * Destroy the current DSP graph and reset state.
+   * @returns {Promise<object>}
+   */
+  async destroy() {
     if (this.fileSourceNode) {
       try {
         this.fileSourceNode.stop();
@@ -890,6 +914,11 @@ class WorkerRuntime {
     this.polyNvoices = nvoices > 0 ? nvoices : 0;
 
     const hint = this.initAudioContext(latency_hint);
+    if (this.audioContext?.state == 'running' && typeof this.audioContext.suspend === 'function') {
+      try {
+        await this.audioContext.suspend();
+      } catch (_) {}
+    }
 
     const wasmBytes = Buffer.from(wasm_base64, 'base64');
     const wasmModule = await WebAssembly.compile(wasmBytes);
@@ -941,6 +970,12 @@ class WorkerRuntime {
     this.wasmEffectFactory = effectFactory;
 
     this.attachParamHandlers();
+    if (this.audioContext?.state === 'running' && typeof this.audioContext.suspend === 'function') {
+      try {
+        await this.audioContext.suspend();
+      } catch (_) {}
+    }
+    this.started = false;
 
     return this.finalizeRuntimeState({
       hint,
@@ -1670,6 +1705,7 @@ class WorkerApp {
       select_midi_input: (params) => this.midiManager.selectInput(params || {}),
       set_param_values: (params) => this.runtime.setParamValues(params || {}),
       stop: () => this.runtime.stop(),
+      destroy: () => this.runtime.destroy(),
     };
   }
 

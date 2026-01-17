@@ -20,6 +20,7 @@ from http.server import (
     ThreadingHTTPServer,
 )
 from functools import partial
+import base64
 import argparse
 import errno
 import json
@@ -222,8 +223,15 @@ def unlock_audio(latency_hint: str = "interactive") -> str:
 
 @mcp.tool()
 def stop() -> str:
-    """Stop audio and clear browser runtime state."""
+    """Suspend audio without clearing browser runtime state."""
     result = _call_bridge("stop")
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def destroy() -> str:
+    """Destroy the current DSP graph and clear browser runtime state."""
+    result = _call_bridge("destroy")
     return json.dumps(result, indent=2)
 
 
@@ -308,21 +316,43 @@ def get_audio_metrics(
 
 @mcp.tool()
 def load_wasm_module(
-    wasm_base64: str,
-    dsp_json: dict | str,
+    wasm_base64: str | None = None,
+    wasm_path: str | None = None,
+    dsp_json: dict | str | None = None,
+    dsp_json_path: str | None = None,
     effect_wasm_base64: str | None = None,
+    effect_wasm_path: str | None = None,
     effect_dsp_json: dict | str | None = None,
+    effect_dsp_json_path: str | None = None,
     name: str | None = None,
     latency_hint: str = "interactive",
 ) -> str:
-    """Load a pre-compiled WebAssembly module (base64) for the current DSP."""
+    """Load a pre-compiled WebAssembly module (base64 or path) for the current DSP."""
+    if not wasm_base64 and wasm_path:
+        with open(wasm_path, "rb") as wasm_file:
+            wasm_base64 = base64.b64encode(wasm_file.read()).decode("ascii")
+    if not effect_wasm_base64 and effect_wasm_path:
+        with open(effect_wasm_path, "rb") as wasm_file:
+            effect_wasm_base64 = base64.b64encode(wasm_file.read()).decode("ascii")
+    if dsp_json is None and dsp_json_path:
+        with open(dsp_json_path, "r", encoding="utf-8") as json_file:
+            dsp_json = json_file.read()
+    if effect_dsp_json is None and effect_dsp_json_path:
+        with open(effect_dsp_json_path, "r", encoding="utf-8") as json_file:
+            effect_dsp_json = json_file.read()
+    if dsp_json is None:
+        raise ValueError("dsp_json is required for load_wasm_module")
     result = _call_bridge(
         "load_wasm_module",
         {
             "wasm_base64": wasm_base64,
+            "wasm_path": wasm_path,
             "dsp_json": dsp_json,
+            "dsp_json_path": dsp_json_path,
             "effect_wasm_base64": effect_wasm_base64,
+            "effect_wasm_path": effect_wasm_path,
             "effect_dsp_json": effect_dsp_json,
+            "effect_dsp_json_path": effect_dsp_json_path,
             "name": name,
             "latency_hint": latency_hint,
         },

@@ -38,8 +38,13 @@ async def main(
     midi_name: str | None,
     wasm_path: str | None,
     dsp_json_path: str | None,
+    wasm_base64: str | None,
+    dsp_json_inline: str | None,
     effect_wasm_path: str | None,
     effect_dsp_json_path: str | None,
+    effect_wasm_base64: str | None,
+    effect_dsp_json_inline: str | None,
+    use_paths: bool,
 ) -> None:
     """Call the requested MCP tool over SSE with the provided arguments.
 
@@ -84,20 +89,35 @@ async def main(
                     raise ValueError("--param-path is required for get_param")
                 args = {"path": param_path}
             elif tool == "load_wasm_module":
-                if not wasm_path or not dsp_json_path:
-                    raise ValueError("--wasm and --dsp-json are required for load_wasm_module")
-                with open(wasm_path, "rb") as f:
-                    wasm_base64 = base64.b64encode(f.read()).decode("ascii")
-                with open(dsp_json_path, "r", encoding="utf-8") as f:
-                    dsp_json = f.read()
-                args = {"wasm_base64": wasm_base64, "dsp_json": dsp_json}
-                if effect_wasm_path and effect_dsp_json_path:
-                    with open(effect_wasm_path, "rb") as f:
-                        effect_wasm_base64 = base64.b64encode(f.read()).decode("ascii")
-                    with open(effect_dsp_json_path, "r", encoding="utf-8") as f:
-                        effect_dsp_json = f.read()
-                    args["effect_wasm_base64"] = effect_wasm_base64
-                    args["effect_dsp_json"] = effect_dsp_json
+                if use_paths:
+                    if not wasm_path or not dsp_json_path:
+                        raise ValueError("--wasm and --dsp-json are required for --use-paths")
+                    args = {"wasm_path": wasm_path, "dsp_json_path": dsp_json_path}
+                    if effect_wasm_path and effect_dsp_json_path:
+                        args["effect_wasm_path"] = effect_wasm_path
+                        args["effect_dsp_json_path"] = effect_dsp_json_path
+                elif wasm_base64 or dsp_json_inline:
+                    if not wasm_base64 or not dsp_json_inline:
+                        raise ValueError("--wasm-base64 and --dsp-json-inline are required together")
+                    args = {"wasm_base64": wasm_base64, "dsp_json": dsp_json_inline}
+                    if effect_wasm_base64 and effect_dsp_json_inline:
+                        args["effect_wasm_base64"] = effect_wasm_base64
+                        args["effect_dsp_json"] = effect_dsp_json_inline
+                else:
+                    if not wasm_path or not dsp_json_path:
+                        raise ValueError("--wasm and --dsp-json are required for load_wasm_module")
+                    with open(wasm_path, "rb") as f:
+                        wasm_base64 = base64.b64encode(f.read()).decode("ascii")
+                    with open(dsp_json_path, "r", encoding="utf-8") as f:
+                        dsp_json = f.read()
+                    args = {"wasm_base64": wasm_base64, "dsp_json": dsp_json}
+                    if effect_wasm_path and effect_dsp_json_path:
+                        with open(effect_wasm_path, "rb") as f:
+                            effect_wasm_base64 = base64.b64encode(f.read()).decode("ascii")
+                        with open(effect_dsp_json_path, "r", encoding="utf-8") as f:
+                            effect_dsp_json = f.read()
+                        args["effect_wasm_base64"] = effect_wasm_base64
+                        args["effect_dsp_json"] = effect_dsp_json
                 if latency_hint:
                     args["latency_hint"] = latency_hint
             elif tool == "get_param_values":
@@ -131,6 +151,7 @@ async def main(
                 "get_midi_status",
                 "start",
                 "stop",
+                "destroy",
             ):
                 args = {}
                 if tool == "get_audio_metrics":
@@ -182,7 +203,7 @@ if __name__ == "__main__":
             "Tool name (compile_and_analyze, compile_and_start, compile, check_syntax, "
             "get_params, get_param, get_param_values, get_dsp_json, save_wasm_module, load_wasm_module, "
             "get_audio_metrics, get_midi_inputs, get_midi_status, select_midi_input, "
-            "set_param_values, set_param, unlock_audio, start, stop)."
+            "set_param_values, set_param, unlock_audio, start, stop, destroy)."
         ),
     )
     parser.add_argument(
@@ -196,6 +217,16 @@ if __name__ == "__main__":
         help="Path to the compiled DSP JSON file for load_wasm_module.",
     )
     parser.add_argument(
+        "--wasm-base64",
+        default=None,
+        help="Base64-encoded DSP wasm for load_wasm_module.",
+    )
+    parser.add_argument(
+        "--dsp-json-inline",
+        default=None,
+        help="Inline DSP JSON string for load_wasm_module.",
+    )
+    parser.add_argument(
         "--effect-wasm",
         default=None,
         help="Path to the effect DSP wasm file for load_wasm_module (poly).",
@@ -204,6 +235,21 @@ if __name__ == "__main__":
         "--effect-dsp-json",
         default=None,
         help="Path to the effect DSP JSON file for load_wasm_module (poly).",
+    )
+    parser.add_argument(
+        "--effect-wasm-base64",
+        default=None,
+        help="Base64-encoded effect DSP wasm for load_wasm_module (poly).",
+    )
+    parser.add_argument(
+        "--effect-dsp-json-inline",
+        default=None,
+        help="Inline effect DSP JSON string for load_wasm_module (poly).",
+    )
+    parser.add_argument(
+        "--use-paths",
+        action="store_true",
+        help="Send wasm/dsp JSON paths directly for load_wasm_module.",
     )
     parser.add_argument(
         "--name",
@@ -349,6 +395,11 @@ if __name__ == "__main__":
         args.midi_name,
         args.wasm,
         args.dsp_json,
+        args.wasm_base64,
+        args.dsp_json_inline,
         args.effect_wasm,
         args.effect_dsp_json,
+        args.effect_wasm_base64,
+        args.effect_dsp_json_inline,
+        args.use_paths,
     )

@@ -785,7 +785,7 @@ export function createBrowserRuntime(options = {}) {
    */
   async function prepareForNewGraph() {
     if (state.faust_node) {
-      await stop();
+      await destroy();
       return;
     }
     resetState({ keepAudioContext: !!state.audio_context });
@@ -965,6 +965,11 @@ export function createBrowserRuntime(options = {}) {
 
     await prepareForNewGraph();
     const hint = initAudioContext(latency_hint);
+    if (!start_audio && state.audio_context?.state === 'running' && typeof state.audio_context.suspend === 'function') {
+      try {
+        await state.audio_context.suspend();
+      } catch (_) {}
+    }
 
     const monoGenerator = compilerManager.createGenerator();
     let wrapped = null;
@@ -1129,9 +1134,23 @@ export function createBrowserRuntime(options = {}) {
   }
 
   /**
-   * Stop audio and reset runtime state.
+   * Stop audio without clearing the DSP state.
    */
   async function stop() {
+    if (state.audio_context && typeof state.audio_context.suspend === 'function') {
+      try {
+        await state.audio_context.suspend();
+      } catch (_) {}
+    }
+    state.started = false;
+    state.status = 'stopped';
+    return withSchema({ status: 'stopped' });
+  }
+
+  /**
+   * Destroy the current DSP graph and reset runtime state.
+   */
+  async function destroy() {
     if (state.file_source_node) {
       try {
         state.file_source_node.stop();
@@ -1255,6 +1274,11 @@ export function createBrowserRuntime(options = {}) {
     state.poly_nvoices = nvoices > 0 ? nvoices : 0;
 
     const hint = initAudioContext(latency_hint);
+    if (state.audio_context?.state === 'running' && typeof state.audio_context.suspend === 'function') {
+      try {
+        await state.audio_context.suspend();
+      } catch (_) {}
+    }
 
     const wasmBytes = base64ToBytes(wasm_base64);
     const wasmModule = await WebAssembly.compile(wasmBytes);
@@ -1306,6 +1330,12 @@ export function createBrowserRuntime(options = {}) {
     state.wasm_effect_factory = effectFactory;
 
     attachParamHandlers();
+    if (state.audio_context?.state === 'running' && typeof state.audio_context.suspend === 'function') {
+      try {
+        await state.audio_context.suspend();
+      } catch (_) {}
+    }
+    state.started = false;
 
     return finalizeRuntimeState({
       hint,
@@ -1496,6 +1526,7 @@ export function createBrowserRuntime(options = {}) {
     start,
     unlock_audio,
     stop,
+    destroy,
     get_status,
     get_dsp_json,
     save_wasm_module,

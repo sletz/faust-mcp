@@ -125,6 +125,36 @@ echo "== start (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool start
 echo "== stop (interactive) =="
 python3 sse_client_example.py --url "${URL}" --tool stop
+echo "== load_wasm_module (path, interactive) =="
+python3 - <<PY
+import os
+import anyio
+from mcp.client.sse import sse_client
+from mcp.client.session import ClientSession
+
+url = "${URL}"
+wasm_path = "${TMPDIR}/dsp.wasm"
+dsp_json_path = "${TMPDIR}/dsp.json"
+effect_wasm_path = "${TMPDIR}/effect.wasm"
+effect_json_path = "${TMPDIR}/effect.json"
+
+async def main():
+    async with sse_client(url) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            args = {"wasm_path": wasm_path, "dsp_json_path": dsp_json_path, "latency_hint": "interactive"}
+            if os.path.isfile(effect_wasm_path) and os.path.isfile(effect_json_path):
+                args["effect_wasm_path"] = effect_wasm_path
+                args["effect_dsp_json_path"] = effect_json_path
+            result = await session.call_tool("load_wasm_module", args)
+            print(result.structuredContent or result.content[0].text)
+
+anyio.run(main)
+PY
+echo "== start (interactive, path) =="
+python3 sse_client_example.py --url "${URL}" --tool start
+echo "== stop (interactive, path) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
 echo "== load_wasm_module (playback) =="
 if [ ${#extra_args[@]} -eq 0 ]; then
   python3 sse_client_example.py --url "${URL}" --tool load_wasm_module \
@@ -136,6 +166,37 @@ else
 fi
 echo "== start (playback) =="
 python3 sse_client_example.py --url "${URL}" --tool start
+echo "== stop (playback) =="
+python3 sse_client_example.py --url "${URL}" --tool stop
+echo "== load_wasm_module (path, playback) =="
+python3 - <<PY
+import os
+import anyio
+from mcp.client.sse import sse_client
+from mcp.client.session import ClientSession
+
+url = "${URL}"
+wasm_path = "${TMPDIR}/dsp.wasm"
+dsp_json_path = "${TMPDIR}/dsp.json"
+effect_wasm_path = "${TMPDIR}/effect.wasm"
+effect_json_path = "${TMPDIR}/effect.json"
+
+async def main():
+    async with sse_client(url) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            args = {"wasm_path": wasm_path, "dsp_json_path": dsp_json_path, "latency_hint": "playback"}
+            if os.path.isfile(effect_wasm_path) and os.path.isfile(effect_json_path):
+                args["effect_wasm_path"] = effect_wasm_path
+                args["effect_dsp_json_path"] = effect_json_path
+            result = await session.call_tool("load_wasm_module", args)
+            print(result.structuredContent or result.content[0].text)
+
+anyio.run(main)
+PY
+echo "== start (playback, path) =="
+python3 sse_client_example.py --url "${URL}" --tool start
+
 echo "== get_param (gain) =="
 python3 sse_client_example.py --url "${URL}" --tool get_param --param-path "${GAIN_PATH}"
 
@@ -152,7 +213,8 @@ python3 sse_client_example.py --url "${URL}" --tool get_param_values
 
 echo "== get_audio_metrics =="
 python3 sse_client_example.py --url "${URL}" --tool get_audio_metrics
-echo "== stop (playback) =="
+
+echo "== stop (playback, path) =="
 python3 sse_client_example.py --url "${URL}" --tool stop
 
 echo "== stop =="

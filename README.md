@@ -62,7 +62,7 @@ Notes:
 
 - SSE is the recommended transport for web clients; stdio is useful for local CLI tools.
 - The real-time server returns parameter metadata and current values, not offline analysis.
-- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `save_wasm_module`, `load_wasm_module`, `get_midi_inputs`, `get_midi_status`, `select_midi_input`, `stop`.
+- Real-time tools: `compile_and_start`, `check_syntax`, `get_params`, `set_param`, `set_param_values`, `get_param`, `get_param_values`, `get_audio_metrics`, `save_wasm_module`, `load_wasm_module`, `get_midi_inputs`, `get_midi_status`, `select_midi_input`, `stop`, `destroy`.
 - Offline tools: `compile_and_analyze`.
 - DawDreamer and real-time servers accept optional `input_source` (`none`, `sine`, `noise`, `file`), `input_freq` (Hz), and `input_file` (path) to inject test inputs.
 
@@ -563,13 +563,27 @@ If you want both runtimes available, add two entries:
 - `get_param_values()`
 - `get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)`
 - `save_wasm_module()`
-- `load_wasm_module(wasm_base64, dsp_json, effect_wasm_base64?, effect_dsp_json?, name?, latency_hint?)`
+- `load_wasm_module(wasm_base64?, wasm_path?, dsp_json?, dsp_json_path?, effect_wasm_base64?, effect_wasm_path?, effect_dsp_json?, effect_dsp_json_path?, name?, latency_hint?)`
 - `get_midi_inputs()`
 - `get_midi_status()`
 - `select_midi_input(index?, name?)`
 - `set_param_values(values)`
 - `set_param(path, value)`
-- `stop()`
+- `stop()` (suspend audio, keep DSP/UI)
+- `destroy()` (stop audio and clear DSP/UI state)
+
+`load_wasm_module` accepts either inline content (`wasm_base64` + `dsp_json`) or file paths
+(`wasm_path` + `dsp_json_path`). Effect modules follow the same pattern with
+`effect_wasm_base64`/`effect_dsp_json` or `effect_wasm_path`/`effect_dsp_json_path`.
+
+Example (paths):
+
+```json
+{
+  "wasm_path": "/path/to/dsp.wasm",
+  "dsp_json_path": "/path/to/dsp.json"
+}
+```
 
 
 `get_audio_metrics()` returns RMS/peak metering derived from bargraphs that are
@@ -1053,6 +1067,7 @@ make rt-get-param RT_PARAM_PATH=/freq
 make rt-get-audio-metrics
 make rt-set-param RT_PARAM_PATH=/freq RT_PARAM_VALUE=440
 make rt-stop
+make rt-destroy
 make stop-rt
 ```
 

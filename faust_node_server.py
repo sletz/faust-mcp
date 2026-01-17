@@ -7,8 +7,8 @@ and control parameters. It delegates audio + DSP work to a Node worker process
 
 Tools:
   - compile_and_start(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
-  - compile(faust_code, name?, input_source?, input_freq?, input_file?, hide_meters?)
-  - load_wasm_module(wasm_base64, dsp_json, effect_wasm_base64?, effect_dsp_json?, name?, latency_hint?)
+  - compile(faust_code, name?, latency_hint?, input_source?, input_freq?, input_file?, hide_meters?)
+  - load_wasm_module(wasm_base64?, wasm_path?, dsp_json?, dsp_json_path?, effect_wasm_base64?, effect_wasm_path?, effect_dsp_json?, effect_dsp_json_path?, name?, latency_hint?)
   - start()
   - check_syntax(faust_code, name?)
   - get_audio_metrics(include_scope?, include_spectrum?, per_channel?, fft_size?, smoothing?, min_db?, max_db?, edge_threshold?, log_bins?)
@@ -23,6 +23,7 @@ Tools:
   - select_midi_input(index?, name?)
   - set_param(path, value)
   - stop()
+  - destroy()
 
 Runtime notes:
   - Requires Node.js and the node-web-audio-api checkout with @grame/faustwasm installed.
@@ -32,6 +33,7 @@ Runtime notes:
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+import base64
 import errno
 import json
 import os
@@ -131,11 +133,20 @@ class NodeWorker:
                 return response.get("result", {})
 
     def stop(self) -> None:
-        """Stop the running DSP and terminate the worker if possible."""
+        """Suspend audio for the running DSP."""
         if not self._proc:
             return
         try:
             self.request("stop")
+        except Exception:
+            pass
+
+    def destroy(self) -> None:
+        """Destroy the running DSP graph and reset worker state."""
+        if not self._proc:
+            return
+        try:
+            self.request("destroy")
         except Exception:
             pass
 
@@ -192,6 +203,7 @@ def compile_and_start(
 def compile(
     faust_code: str,
     name: str = "faust-rt",
+    latency_hint: str = "interactive",
     input_source: str = "none",
     input_freq: float | None = None,
     input_file: str | None = None,
@@ -206,6 +218,7 @@ def compile(
         {
             "dsp_code": faust_code,
             "name": name,
+            "latency_hint": latency_hint,
             "input_source": input_source,
             "input_freq": input_freq,
             "input_file": input_file,
@@ -217,22 +230,44 @@ def compile(
 
 @mcp.tool()
 def load_wasm_module(
-    wasm_base64: str,
-    dsp_json: dict | str,
+    wasm_base64: str | None = None,
+    wasm_path: str | None = None,
+    dsp_json: dict | str | None = None,
+    dsp_json_path: str | None = None,
     effect_wasm_base64: str | None = None,
+    effect_wasm_path: str | None = None,
     effect_dsp_json: dict | str | None = None,
+    effect_dsp_json_path: str | None = None,
     name: str | None = None,
     latency_hint: str = "interactive",
 ) -> str:
-    """Load a pre-compiled WebAssembly module (base64) for the running DSP."""
+    """Load a pre-compiled WebAssembly module (base64 or path) for the running DSP."""
+    if not wasm_base64 and wasm_path:
+        with open(wasm_path, "rb") as wasm_file:
+            wasm_base64 = base64.b64encode(wasm_file.read()).decode("ascii")
+    if not effect_wasm_base64 and effect_wasm_path:
+        with open(effect_wasm_path, "rb") as wasm_file:
+            effect_wasm_base64 = base64.b64encode(wasm_file.read()).decode("ascii")
+    if dsp_json is None and dsp_json_path:
+        with open(dsp_json_path, "r", encoding="utf-8") as json_file:
+            dsp_json = json_file.read()
+    if effect_dsp_json is None and effect_dsp_json_path:
+        with open(effect_dsp_json_path, "r", encoding="utf-8") as json_file:
+            effect_dsp_json = json_file.read()
+    if dsp_json is None:
+        raise ValueError("dsp_json is required for load_wasm_module")
 
     result = worker.request(
         "load_wasm_module",
         {
             "wasm_base64": wasm_base64,
+            "wasm_path": wasm_path,
             "dsp_json": dsp_json,
+            "dsp_json_path": dsp_json_path,
             "effect_wasm_base64": effect_wasm_base64,
+            "effect_wasm_path": effect_wasm_path,
             "effect_dsp_json": effect_dsp_json,
+            "effect_dsp_json_path": effect_dsp_json_path,
             "name": name,
             "latency_hint": latency_hint,
         },
@@ -366,9 +401,17 @@ def set_param_values(values: list[dict]) -> str:
 
 @mcp.tool()
 def stop() -> str:
-    """Stop the running DSP and close the audio context."""
+    """Suspend audio for the running DSP."""
 
     worker.stop()
+    return json.dumps({"status": "stopped"}, indent=2)
+
+
+@mcp.tool()
+def destroy() -> str:
+    """Destroy the running DSP and close the audio context."""
+
+    worker.destroy()
     return json.dumps({"status": "stopped"}, indent=2)
 
 
