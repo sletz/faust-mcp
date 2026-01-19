@@ -671,9 +671,9 @@ export function createBrowserRuntime(options = {}) {
   /**
    * Guard to ensure a DSP exists before invoking runtime controls.
    */
-  function ensureRunning() {
+  function ensureCompiled() {
     if (!state.faust_node) {
-      throw new ToolError('no_dsp', 'No running DSP. Call compile_and_start first.');
+      throw new ToolError('no_dsp', 'No compiled DSP. Call compile_and_start, compile or load_wasm_module first.');
     }
   }
 
@@ -1088,7 +1088,7 @@ export function createBrowserRuntime(options = {}) {
    * Start the AudioContext and DSP processing.
    */
   async function start() {
-    ensureRunning();
+    ensureCompiled();
     if (state.started) {
       return withSchema({ status: 'started', already_started: true });
     }
@@ -1200,7 +1200,7 @@ export function createBrowserRuntime(options = {}) {
    * Return the current Faust JSON description.
    */
   async function get_dsp_json() {
-    ensureRunning();
+    ensureCompiled();
     return withSchema({ status: 'ok', faust_json: state.dsp_json });
   }
 
@@ -1349,7 +1349,7 @@ export function createBrowserRuntime(options = {}) {
    * Return parameter descriptors and paths.
    */
   async function get_params() {
-    ensureRunning();
+    ensureCompiled();
     return withSchema({
       status: 'ok',
       params: state.params,
@@ -1361,7 +1361,7 @@ export function createBrowserRuntime(options = {}) {
    * Return the current value of a single parameter.
    */
   async function get_param(path) {
-    ensureRunning();
+    ensureCompiled();
     const current = Object.prototype.hasOwnProperty.call(state.input_params_cache, path)
       ? state.input_params_cache[path]
       : state.faust_node.getParamValue(path);
@@ -1372,7 +1372,7 @@ export function createBrowserRuntime(options = {}) {
    * Return current values for all parameters.
    */
   async function get_param_values() {
-    ensureRunning();
+    ensureCompiled();
     const paramPaths = getParamPaths();
     const values = paramPaths.map((path) => ({
       path,
@@ -1406,7 +1406,7 @@ export function createBrowserRuntime(options = {}) {
    * Set a single parameter value.
    */
   async function set_param(path, value) {
-    ensureRunning();
+    ensureCompiled();
     if (typeof path !== 'string') {
       throw new ToolError('invalid_params', 'path must be a string');
     }
@@ -1422,7 +1422,7 @@ export function createBrowserRuntime(options = {}) {
    * Set multiple parameter values in a single call.
    */
   async function set_param_values(values) {
-    ensureRunning();
+    ensureCompiled();
     if (!Array.isArray(values)) {
       throw new ToolError('invalid_params', 'values must be an array');
     }
@@ -1457,7 +1457,7 @@ export function createBrowserRuntime(options = {}) {
     edge_threshold = null,
     log_bins = null,
   ) {
-    ensureRunning();
+    ensureCompiled();
     return withSchema(
       metricsCollector.getMetrics({
         include_scope,

@@ -433,11 +433,11 @@ class WorkerRuntime {
   /**
    * Guard to ensure a DSP is running before control operations.
    */
-  ensureRunning() {
+  ensureCompiled() {
     if (!this.faustNode) {
       throw new ToolError(
         'no_dsp',
-        'No running DSP. Call compile_and_start first.',
+        'No compiled DSP. Call compile_and_start, compile or load_wasm_module first.',
       );
     }
   }
@@ -758,7 +758,7 @@ class WorkerRuntime {
    * @returns {Promise<object>}
    */
   async startDSP() {
-    this.ensureRunning();
+    this.ensureCompiled();
     if (this.audioContext?.state === 'suspended' && typeof this.audioContext.resume === 'function') {
       try {
         await this.audioContext.resume();
@@ -834,7 +834,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   getAudioMetrics(options) {
-    this.ensureRunning();
+    this.ensureCompiled();
     return this.withSchema(this.metricsCollector.getMetrics(options));
   }
 
@@ -991,7 +991,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   setParam({ path, value }) {
-    this.ensureRunning();
+    this.ensureCompiled();
     this.faustNode.setParamValue(path, value);
     const current = this.faustNode.getParamValue(path);
     return this.withSchema({ status: 'ok', path, value: current });
@@ -1003,7 +1003,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   getParam({ path }) {
-    this.ensureRunning();
+    this.ensureCompiled();
     const current = Object.prototype.hasOwnProperty.call(this.inputParamsCache, path)
       ? this.inputParamsCache[path]
       : this.faustNode.getParamValue(path);
@@ -1015,7 +1015,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   getParams() {
-    this.ensureRunning();
+    this.ensureCompiled();
     return this.withSchema({
       status: 'ok',
       params: this.paramsCache,
@@ -1028,7 +1028,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   getDspJson() {
-    this.ensureRunning();
+    this.ensureCompiled();
     return this.withSchema({ status: 'ok', faust_json: this.faustJson });
   }
 
@@ -1037,7 +1037,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   getParamValues() {
-    this.ensureRunning();
+    this.ensureCompiled();
     const paramPaths = this.getParamPaths();
     const values = paramPaths.map((path) => ({
       path,
@@ -1073,7 +1073,7 @@ class WorkerRuntime {
    * @returns {object}
    */
   setParamValues({ values }) {
-    this.ensureRunning();
+    this.ensureCompiled();
     if (!Array.isArray(values)) {
       throw new ToolError('invalid_params', 'values must be an array');
     }
